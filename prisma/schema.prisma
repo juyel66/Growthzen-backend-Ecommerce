@@ -1,0 +1,370 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id               String        @id @default(cuid())
+  name             String
+  email            String        @unique
+  password         String
+  role             Role          @default(CUSTOMER)
+  isVerified       Boolean       @default(false)
+  isActive         Boolean       @default(true)
+  refreshTokenHash String?
+  otpCodeHash      String?
+  otpExpiresAt     DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  orders           Order[]
+  createdProducts  Product[]
+  reviews          Review[]
+  cart             Cart?
+  wishlist         Wishlist?
+  couponUsages     CouponUsage[]
+}
+
+model Product {
+  id                String          @id @default(cuid())
+  title             String
+  shortDescription  String
+  description       String
+  category          String
+  costPrice         Float
+  customerSellPrice Float
+  resellerPrice     Float
+  salePrice         Float?
+  discountType      DiscountType?
+  discountValue     Float?
+  taxRate           Float?
+  couponCode        String?
+  status            ProductStatus   @default(DRAFT)
+  thumbnailImage    String
+  productImages     String[]
+  isFeatured        Boolean         @default(false)
+  createdById       String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  productVideos     String[]        @default([])
+  slug              String          @unique
+  productCode       String          @unique
+  barcode           String?         @unique
+  attributes        Json            @default("[]")
+  orderItems        OrderItem[]
+  createdBy         User?           @relation(fields: [createdById], references: [id])
+  reviews           Review[]
+  cartItems         CartItem[]
+  wishlistItems     WishlistItem[]
+  couponProducts    CouponProduct[]
+}
+
+model Cart {
+  id              String     @id @default(cuid())
+  userId          String     @unique
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items           CartItem[]
+  appliedCouponId String?
+  appliedCoupon   Coupon?    @relation(fields: [appliedCouponId], references: [id], onDelete: SetNull)
+
+  @@index([appliedCouponId])
+}
+
+model ShippingMethod {
+  id                    String               @id @default(cuid())
+  name                  String               @unique
+  charge                Float
+  estimatedDeliveryDays Int
+  description           String?
+  status                ShippingMethodStatus @default(ACTIVE)
+  deletedAt             DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  orders                Order[]
+
+  @@index([status, deletedAt])
+}
+
+model Coupon {
+  id                 String          @id @default(cuid())
+  code               String          @unique
+  description        String?
+  discountType       DiscountType
+  discountValue      Float
+  scope              CouponScope     @default(ENTIRE_ORDER)
+  categories         String[]        @default([])
+  startsAt           DateTime
+  expiresAt          DateTime
+  maximumUsage       Int?
+  perUserUsageLimit  Int?
+  minimumOrderAmount Float?
+  maximumDiscount    Float?
+  isActive           Boolean         @default(true)
+  deletedAt          DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  products           CouponProduct[]
+  usages             CouponUsage[]
+  orders             Order[]
+  carts              Cart[]
+
+  @@index([isActive, startsAt, expiresAt, deletedAt])
+}
+
+model CouponProduct {
+  couponId  String
+  productId String
+  coupon    Coupon  @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([couponId, productId])
+  @@index([productId])
+}
+
+model CouponUsage {
+  id             String   @id @default(cuid())
+  couponId       String
+  userId         String
+  orderId        String   @unique
+  discountAmount Float
+  createdAt      DateTime @default(now())
+  coupon         Coupon   @relation(fields: [couponId], references: [id], onDelete: Restrict)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([couponId, userId])
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  productId String
+  quantity  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId])
+  @@index([productId])
+}
+
+model Wishlist {
+  id        String         @id @default(cuid())
+  userId    String         @unique
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     WishlistItem[]
+}
+
+model WishlistItem {
+  id         String   @id @default(cuid())
+  wishlistId String
+  productId  String
+  createdAt  DateTime @default(now())
+  wishlist   Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([wishlistId, productId])
+  @@index([productId])
+}
+
+model AppSetting {
+  id                         String   @id @default(cuid())
+  insideDhakaDeliveryCharge  Float    @default(0)
+  outsideDhakaDeliveryCharge Float    @default(0)
+  customerDiscountPercentage Int      @default(0)
+  couponCode                 String?
+  couponActive               Boolean  @default(false)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+}
+
+model Order {
+  id                    String               @id @default(cuid())
+  orderCode             String               @unique
+  userId                String?
+  userEmail             String?
+  orderedByRole         Role                 @default(CUSTOMER)
+  customerName          String
+  customerPhone         String
+  address               String
+  deliveryArea          DeliveryArea
+  subtotal              Float
+  discountAmount        Float
+  deliveryCharge        Float
+  payableAmount         Float
+  couponCode            String?
+  status                OrderStatus          @default(PENDING)
+  confirmedAt           DateTime?
+  cancelledAt           DateTime?
+  deliveredAt           DateTime?
+  adminNote             String?
+  idempotencyKey        String?              @unique
+  shippingMethodId      String?
+  shippingMethodName    String?
+  estimatedDeliveryDate DateTime?
+  trackingNumber        String?
+  courierName           String?
+  deliveryStatus        DeliveryStatus       @default(PENDING)
+  couponId              String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  user                  User?                @relation(fields: [userId], references: [id])
+  items                 OrderItem[]
+  reviews               Review[]
+  payment               Payment?
+  statusHistory         OrderStatusHistory[]
+  shippingMethod        ShippingMethod?      @relation(fields: [shippingMethodId], references: [id], onDelete: SetNull)
+  coupon                Coupon?              @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  couponUsage           CouponUsage?
+
+  @@index([shippingMethodId])
+  @@index([couponId])
+  @@index([deliveryStatus])
+}
+
+model OrderStatusHistory {
+  id             String      @id @default(cuid())
+  orderId        String
+  previousStatus OrderStatus
+  newStatus      OrderStatus
+  changedById    String?
+  adminNote      String?
+  createdAt      DateTime    @default(now())
+  order          Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  orderId         String        @unique
+  method          PaymentMethod
+  status          PaymentStatus @default(PENDING)
+  senderNumber    String?
+  transactionId   String?       @unique
+  paidAmount      Float?
+  screenshot      String?
+  rejectionReason String?
+  refundReason    String?
+  verifiedById    String?
+  verifiedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model OrderItem {
+  id             String  @id @default(cuid())
+  orderId        String
+  productId      String
+  productCode    String
+  quantity       Int
+  size           String?
+  unitPrice      Float
+  baseUnitPrice  Float?
+  discountAmount Float   @default(0)
+  totalPrice     Float
+  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product        Product @relation(fields: [productId], references: [id])
+  review         Review?
+}
+
+model Review {
+  id          String       @id @default(cuid())
+  productId   String
+  orderId     String
+  orderItemId String       @unique
+  userId      String
+  rating      Int
+  comment     String?
+  images      String[]     @default([])
+  status      ReviewStatus @default(APPROVED)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  product   Product   @relation(fields: [productId], references: [id])
+  order     Order     @relation(fields: [orderId], references: [id])
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+}
+
+enum Role {
+  ADMIN
+  RESELLER
+  CUSTOMER
+  SUPER_ADMIN
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  PACKED
+  SHIPPED
+  CANCELLED
+  DELIVERED
+  RETURNED
+}
+
+enum PaymentMethod {
+  COD
+  BKASH
+  NAGAD
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum ShippingMethodStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum DeliveryStatus {
+  PENDING
+  PACKED
+  SHIPPED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  RETURNED
+}
+
+enum CouponScope {
+  ENTIRE_ORDER
+  SPECIFIC_PRODUCT
+  SPECIFIC_CATEGORY
+}
+
+enum DeliveryArea {
+  INSIDE_DHAKA
+  OUTSIDE_DHAKA
+}
+
+enum ReviewStatus {
+  APPROVED
+  HIDDEN
+}
