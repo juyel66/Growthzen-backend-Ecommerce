@@ -1,4 +1,3 @@
-// https://chatgpt.com/share/6a33ac01-2674-83e8-9c87-42f05ee57982
 import "dotenv/config";
 import app from "./app";
 import prismaClient from "./config/prisma";
@@ -10,6 +9,7 @@ const startServer = async (): Promise<void> => {
   try {
     await prismaClient.$connect();
     await syncSuperAdminAccount();
+
     console.log("Database is connected");
 
     app.listen(port, () => {
