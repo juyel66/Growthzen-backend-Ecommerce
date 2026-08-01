@@ -12,7 +12,14 @@ const validateQueryRequest = (schema: ZodTypeAny) => {
       return;
     }
 
-    req.query = result.data as Request["query"];
+    const validatedQuery = result.data as Request["query"];
+
+    Object.defineProperty(req, "query", {
+      configurable: true,
+      enumerable: true,
+      value: validatedQuery,
+      writable: true,
+    });
     next();
   };
 };
