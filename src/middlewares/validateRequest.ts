@@ -11,7 +11,14 @@ const validateRequest = (schema: ZodTypeAny) => {
       return;
     }
 
-    req.body = result.data;
+    const validatedBody = result.data;
+
+    Object.defineProperty(req, "body", {
+      configurable: true,
+      enumerable: true,
+      value: validatedBody,
+      writable: true,
+    });
     next();
   };
 };
