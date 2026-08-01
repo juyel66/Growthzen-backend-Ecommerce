@@ -29,6 +29,7 @@ router.use("/shipping", shippingRoutes);
 router.use("/coupons", couponRoutes);
 router.use("/settings", settingsRoutes);
 router.use("/orders", orderRoutes);
+router.use("/dashboard", dashboardRoutes);
 router.use("/dashboard-management", dashboardRoutes);
 
 export default router;

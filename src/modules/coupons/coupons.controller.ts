@@ -3,10 +3,10 @@ import AppError from "../../utils/AppError"; import catchAsync from "../../utils
 import { applyCoupon, createCoupon, deleteCoupon, getCouponView, listCoupons, removeCoupon, updateCoupon } from "./coupons.service";
 const id = (req: Request) => { const value=req.params.id; const result=Array.isArray(value)?value[0]:value; if(!result) throw new AppError(400,"Coupon id is required"); return result; };
 const user = (req: Request) => { if(!req.user) throw new AppError(401,"User is not authenticated"); return req.user; };
-export const createCouponHandler=catchAsync(async(req:Request,res:Response)=>sendResponse(res,{statusCode:201,message:"Coupon created successfully",data:await createCoupon(req.body)}));
-export const listCouponsHandler=catchAsync(async(_req:Request,res:Response)=>sendResponse(res,{message:"Coupons retrieved successfully",data:await listCoupons()}));
-export const getCouponHandler=catchAsync(async(req:Request,res:Response)=>sendResponse(res,{message:"Coupon retrieved successfully",data:await getCouponView(id(req))}));
-export const updateCouponHandler=catchAsync(async(req:Request,res:Response)=>sendResponse(res,{message:"Coupon updated successfully",data:await updateCoupon(id(req),req.body)}));
-export const deleteCouponHandler=catchAsync(async(req:Request,res:Response)=>sendResponse(res,{message:"Coupon deleted successfully",data:await deleteCoupon(id(req))}));
+export const createCouponHandler=catchAsync(async(req:Request,res:Response)=>{sendResponse(res,{statusCode:201,message:"Coupon created successfully",data:await createCoupon(req.body)});});
+export const listCouponsHandler=catchAsync(async(_req:Request,res:Response)=>{sendResponse(res,{message:"Coupons retrieved successfully",data:await listCoupons()});});
+export const getCouponHandler=catchAsync(async(req:Request,res:Response)=>{sendResponse(res,{message:"Coupon retrieved successfully",data:await getCouponView(id(req))});});
+export const updateCouponHandler=catchAsync(async(req:Request,res:Response)=>{sendResponse(res,{message:"Coupon updated successfully",data:await updateCoupon(id(req),req.body)});});
+export const deleteCouponHandler=catchAsync(async(req:Request,res:Response)=>{sendResponse(res,{message:"Coupon deleted successfully",data:await deleteCoupon(id(req))});});
 export const applyCouponHandler=catchAsync(async(req:Request,res:Response)=>{const current=user(req);sendResponse(res,{message:"Coupon applied successfully",data:await applyCoupon(current.id,current.role,req.body.code)});});
-export const removeCouponHandler=catchAsync(async(req:Request,res:Response)=>sendResponse(res,{message:"Coupon removed successfully",data:await removeCoupon(user(req).id)}));
+export const removeCouponHandler=catchAsync(async(req:Request,res:Response)=>{sendResponse(res,{message:"Coupon removed successfully",data:await removeCoupon(user(req).id)});});
