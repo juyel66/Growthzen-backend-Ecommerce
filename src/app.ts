@@ -49,7 +49,7 @@ app.use(
 app.use("/api/v1", apiRoutes);
 
 /**
- * Global Error Handler
+ * Global Error Handler .
  */
 app.use(errorHandler);
 
