@@ -13,11 +13,14 @@ import paymentRoutes from "../modules/payments/payments.route";
 import adminCommerceRoutes from "../modules/admin/admin-commerce.route";
 import shippingRoutes from "../modules/shipping/shipping.route";
 import couponRoutes from "../modules/coupons/coupons.route";
+import reportRoutes from "../modules/reports/reports.route";
+import categoryRoutes from "../modules/categories/category.route";
 
 const router = Router();
 
 router.use("/auth", authRoutes);
 router.use("/users", userRoutes);
+router.use("/categories", categoryRoutes);
 router.use("/products", productRoutes);
 router.use("/reviews", reviewRoutes);
 router.use("/cart", cartRoutes);
@@ -31,5 +34,6 @@ router.use("/settings", settingsRoutes);
 router.use("/orders", orderRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/dashboard-management", dashboardRoutes);
+router.use("/reports", reportRoutes);
 
 export default router;

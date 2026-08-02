@@ -32,7 +32,8 @@ model Product {
   title             String
   shortDescription  String
   description       String
-  category          String
+  category          String?
+  categoryId        String?
   costPrice         Float
   customerSellPrice Float
   resellerPrice     Float
@@ -55,10 +56,39 @@ model Product {
   attributes        Json            @default("[]")
   orderItems        OrderItem[]
   createdBy         User?           @relation(fields: [createdById], references: [id])
+  categoryRel       Category?       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   reviews           Review[]
   cartItems         CartItem[]
   wishlistItems     WishlistItem[]
   couponProducts    CouponProduct[]
+
+  @@index([categoryId])
+}
+
+model Category {
+  id                 String         @id @default(cuid())
+  name               String         @unique
+  slug               String         @unique
+  description        String?
+  image              String?
+  parentCategoryId   String?
+  discountPercentage Float          @default(0)
+  discountEnabled    Boolean        @default(false)
+  sortOrder          Int            @default(0)
+  showOnHomepage     Boolean        @default(false)
+  status             CategoryStatus @default(ACTIVE)
+  metaTitle          String?
+  metaDescription    String?
+  deletedAt          DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  parentCategory Category?  @relation("CategoryToParent", fields: [parentCategoryId], references: [id], onDelete: SetNull)
+  subCategories  Category[] @relation("CategoryToParent")
+  products       Product[]
+
+  @@index([status, deletedAt])
+  @@index([parentCategoryId])
 }
 
 model Cart {
@@ -176,11 +206,51 @@ model WishlistItem {
 
 model AppSetting {
   id                         String   @id @default(cuid())
-  insideDhakaDeliveryCharge  Float    @default(0)
-  outsideDhakaDeliveryCharge Float    @default(0)
+
+  // General Settings
+  storeName                  String   @default("GrowthZen Store")
+  companyName                String   @default("GrowthZen Inc.")
+  storeLogo                  String?
+  favicon                    String?
+  supportEmail               String   @default("support@growthzen.com")
+  supportPhone               String   @default("+8801700000000")
+  companyAddress             String   @default("Dhaka, Bangladesh")
+  currency                   String   @default("BDT")
+  currencySymbol             String   @default("৳")
+  timezone                   String   @default("Asia/Dhaka")
+  language                   String   @default("en")
+
+  // Delivery Settings
+  insideDhakaDeliveryCharge  Float    @default(60)
+  outsideDhakaDeliveryCharge Float    @default(120)
+  freeShippingMinOrderAmount Float    @default(2000)
+  estimatedDeliveryDays      Int      @default(3)
+
+  // Payment Settings
+  codEnabled                 Boolean  @default(true)
+  bkashEnabled               Boolean  @default(true)
+  nagadEnabled               Boolean  @default(true)
+  merchantName               String?  @default("GrowthZen Merchant")
+  merchantNumber             String?  @default("01700000000")
+  paymentInstructions        String?  @default("Please send exact amount to merchant number and provide Transaction ID.")
+
+  // SMTP Settings
+  smtpHost                   String?  @default("smtp.mailtrap.io")
+  smtpPort                   Int?     @default(587)
+  smtpUsername               String?
+  smtpPassword               String?
+  senderName                 String?  @default("GrowthZen Ecommerce")
+  senderEmail                String?  @default("noreply@growthzen.com")
+
+  // Maintenance Settings
+  maintenanceMode            Boolean  @default(false)
+  maintenanceMessage         String?  @default("Store is currently under scheduled maintenance. Please try again later.")
+
+  // Legacy fields kept for backward compatibility
   customerDiscountPercentage Int      @default(0)
   couponCode                 String?
   couponActive               Boolean  @default(false)
+
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
 }
@@ -368,3 +438,9 @@ enum ReviewStatus {
   APPROVED
   HIDDEN
 }
+
+enum CategoryStatus {
+  ACTIVE
+  INACTIVE
+}
+

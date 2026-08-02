@@ -8,6 +8,7 @@ import { normalizeProductCategory } from "./products.category";
 
 const productInclude = {
   createdBy: { select: { name: true, email: true } },
+  categoryRel: { select: { id: true, name: true, slug: true, discountPercentage: true, discountEnabled: true } },
   reviews: {
     where: { status: "APPROVED" as const },
     orderBy: { createdAt: "desc" as const },
@@ -83,6 +84,12 @@ const mapProduct = (product: ProductRecord, viewerRole?: Role): ProductView => {
   const attributes = parseAttributes(product.attributes);
   const sizeAttribute = attributes.find(isSizeAttribute);
 
+  // Dynamic Category Discount Calculation
+  const categoryDiscount = product.categoryRel?.discountEnabled ? (product.categoryRel.discountPercentage ?? 0) : 0;
+  const originalPrice = product.customerSellPrice;
+  const discountAmount = Number(((originalPrice * categoryDiscount) / 100).toFixed(2));
+  const finalPrice = Math.max(0, Number((originalPrice - discountAmount).toFixed(2)));
+
   return {
     id: product.id,
     title: product.title,
@@ -91,9 +98,23 @@ const mapProduct = (product: ProductRecord, viewerRole?: Role): ProductView => {
     slug: product.slug,
     productCode: product.productCode,
     barcode: product.barcode,
-    category: product.category,
+    categoryId: product.categoryId,
+    category: product.categoryRel?.name ?? product.category ?? "",
+    categoryDetails: product.categoryRel
+      ? {
+          id: product.categoryRel.id,
+          name: product.categoryRel.name,
+          slug: product.categoryRel.slug,
+          discountPercentage: product.categoryRel.discountPercentage,
+          discountEnabled: product.categoryRel.discountEnabled,
+        }
+      : null,
     ...(isAdmin ? { costPrice: product.costPrice } : {}),
     customerSellPrice: product.customerSellPrice,
+    originalPrice,
+    categoryDiscount,
+    discountAmount,
+    finalPrice,
     ...(isAdmin || isReseller ? { resellerPrice: product.resellerPrice } : {}),
     salePrice: product.salePrice,
     discountType: product.discountType,
@@ -146,14 +167,55 @@ const assertUniqueIdentifiers = async (productCode: string | undefined, barcode:
   throw new AppError(409, "Barcode already exists");
 };
 
-const toCreateData = (payload: ProductCreateInput, slug: string, createdById: string): Prisma.ProductCreateInput => ({
+const resolveAndValidateCategory = async (
+  categoryId?: string,
+  categoryText?: string
+): Promise<{ categoryId: string; categoryName: string }> => {
+  if (categoryId) {
+    const cat = await prismaClient.category.findFirst({
+      where: { id: categoryId, status: "ACTIVE", deletedAt: null },
+    });
+    if (!cat) {
+      throw new AppError(400, "Invalid or inactive category selected");
+    }
+    return { categoryId: cat.id, categoryName: cat.name };
+  }
+
+  if (categoryText && categoryText.trim()) {
+    const name = normalizeProductCategory(categoryText);
+    let cat = await prismaClient.category.findFirst({
+      where: { name: { equals: name, mode: "insensitive" }, deletedAt: null },
+    });
+
+    if (!cat) {
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "category";
+      cat = await prismaClient.category.create({
+        data: { name, slug: `${slug}-${Date.now().toString(36)}`, status: "ACTIVE" },
+      });
+    } else if (cat.status !== "ACTIVE") {
+      throw new AppError(400, `Category "${cat.name}" is inactive`);
+    }
+
+    return { categoryId: cat.id, categoryName: cat.name };
+  }
+
+  throw new AppError(400, "Category is required");
+};
+
+const toCreateData = (
+  payload: ProductCreateInput,
+  slug: string,
+  createdById: string,
+  resolvedCategory: { categoryId: string; categoryName: string }
+): Prisma.ProductCreateInput => ({
   title: payload.title,
   shortDescription: payload.shortDescription,
   description: payload.description,
   slug,
   productCode: payload.productCode,
   barcode: payload.barcode ?? null,
-  category: normalizeProductCategory(payload.category),
+  category: resolvedCategory.categoryName,
+  categoryRel: { connect: { id: resolvedCategory.categoryId } },
   costPrice: payload.costPrice,
   customerSellPrice: payload.customerSellPrice,
   resellerPrice: payload.resellerPrice,
@@ -173,8 +235,9 @@ const toCreateData = (payload: ProductCreateInput, slug: string, createdById: st
 
 export const createProduct = async (payload: ProductCreateInput, createdById: string): Promise<ProductView> => {
   await assertUniqueIdentifiers(payload.productCode, payload.barcode);
+  const resolvedCategory = await resolveAndValidateCategory(payload.categoryId, payload.category);
   const product = await prismaClient.product.create({
-    data: toCreateData(payload, await buildUniqueSlug(payload.title), createdById),
+    data: toCreateData(payload, await buildUniqueSlug(payload.title), createdById, resolvedCategory),
     include: productInclude,
   });
   return mapProduct(product, "ADMIN");
@@ -194,21 +257,31 @@ export const getProductById = async (id: string, viewerRole?: Role): Promise<Pro
 export const updateProduct = async (id: string, payload: ProductUpdateInput): Promise<ProductView> => {
   const existing = await prismaClient.product.findUnique({
     where: { id },
-    select: { id: true, attributes: true, thumbnailImage: true, productImages: true, productVideos: true },
+    select: { id: true, attributes: true, thumbnailImage: true, productImages: true, productVideos: true, categoryId: true, category: true },
   });
   if (!existing) throw new AppError(404, "Product not found");
   await assertUniqueIdentifiers(payload.productCode, payload.barcode, id);
 
-  const { attributes, enableSize, availableSizes, title, category, ...fields } = payload;
+  const { attributes, enableSize, availableSizes, title, categoryId, category, ...fields } = payload;
   const nextAttributes = attributes !== undefined || enableSize !== undefined
     ? configureSizeAttribute(attributes ?? parseAttributes(existing.attributes), enableSize, availableSizes)
     : undefined;
+
+  let resolvedCategory: { categoryId: string; categoryName: string } | undefined;
+  if (categoryId || category) {
+    resolvedCategory = await resolveAndValidateCategory(categoryId, category);
+  }
+
   const data: Prisma.ProductUpdateInput = {
     ...fields,
     ...(nextAttributes !== undefined ? { attributes: nextAttributes as unknown as Prisma.InputJsonValue } : {}),
     ...(title ? { title, slug: await buildUniqueSlug(title, id) } : {}),
-    ...(category !== undefined ? { category: normalizeProductCategory(category) } : {}),
+    ...(resolvedCategory ? {
+      category: resolvedCategory.categoryName,
+      categoryRel: { connect: { id: resolvedCategory.categoryId } },
+    } : {}),
   };
+
   const product = await prismaClient.product.update({ where: { id }, data, include: productInclude });
 
   const obsoleteFiles = [

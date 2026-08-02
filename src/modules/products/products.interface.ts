@@ -5,11 +5,20 @@ export interface ProductAttribute {
   values: string[];
 }
 
+export interface ProductCategoryDetails {
+  id: string;
+  name: string;
+  slug: string;
+  discountPercentage?: number;
+  discountEnabled?: boolean;
+}
+
 export interface ProductCreateInput {
   title: string;
   shortDescription: string;
   description: string;
-  category: string;
+  categoryId?: string;
+  category?: string;
   costPrice: number;
   customerSellPrice: number;
   resellerPrice: number;
@@ -49,9 +58,15 @@ export interface ProductView {
   slug: string;
   productCode: string;
   barcode: string | null;
+  categoryId: string | null;
   category: string;
+  categoryDetails?: ProductCategoryDetails | null;
   costPrice?: number;
   customerSellPrice: number;
+  originalPrice: number;
+  categoryDiscount: number;
+  discountAmount: number;
+  finalPrice: number;
   resellerPrice?: number;
   salePrice: number | null;
   discountType: DiscountType | null;

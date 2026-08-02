@@ -57,7 +57,7 @@ export const evaluateCoupon = async (coupon: CouponRecord, userId: string, cart:
   const originalTotal = Number(lines.reduce((sum, line) => sum + line.total, 0).toFixed(2));
   if (coupon.minimumOrderAmount !== null && originalTotal < coupon.minimumOrderAmount) throw new AppError(400, `Minimum order amount is ${coupon.minimumOrderAmount}`);
   const productIds = new Set(coupon.products.map((item) => item.productId)); const categories = new Set(coupon.categories.map((item) => item.toLowerCase()));
-  const eligible = lines.filter(({ item }) => coupon.scope === "ENTIRE_ORDER" || (coupon.scope === "SPECIFIC_PRODUCT" && productIds.has(item.product.id)) || (coupon.scope === "SPECIFIC_CATEGORY" && categories.has(item.product.category.toLowerCase())));
+  const eligible = lines.filter(({ item }) => coupon.scope === "ENTIRE_ORDER" || (coupon.scope === "SPECIFIC_PRODUCT" && productIds.has(item.product.id)) || (coupon.scope === "SPECIFIC_CATEGORY" && categories.has((item.product.category ?? "").toLowerCase())));
   if (!eligible.length) throw new AppError(400, "Coupon is not applicable to selected products");
   const eligibleTotal = eligible.reduce((sum, line) => sum + line.total, 0);
   let discount = coupon.discountType === "PERCENTAGE" ? eligibleTotal * coupon.discountValue / 100 : coupon.discountValue;
