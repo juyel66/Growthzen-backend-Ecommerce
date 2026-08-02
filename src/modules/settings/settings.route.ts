@@ -1,6 +1,18 @@
 import { Router } from "express";
-import { authenticate, authorizeRoles } from "../../middlewares/auth";
+import { authenticate, authorizeRoles, optionalAuthenticate } from "../../middlewares/auth";
+import { bannerUpload, mapBannerUploadToBody } from "../../middlewares/upload";
 import validateRequest from "../../middlewares/validateRequest";
+import {
+  createBannerHandler,
+  deleteBannerHandler,
+  getBannerByIdHandler,
+  getBannersHandler,
+  updateBannerHandler,
+} from "./banner.controller";
+import {
+  createBannerValidationSchema,
+  updateBannerValidationSchema,
+} from "./banner.validation";
 import {
   getCategoryDiscountsHandler,
   getSettingsHandler,
@@ -11,23 +23,169 @@ import { updateSettingsValidationSchema } from "./settings.validation";
 
 const router = Router();
 
-router.use(authenticate, authorizeRoles("ADMIN", "SUPER_ADMIN"));
+// ==========================================
+// 1. BANNER / CAROUSEL MANAGEMENT ROUTES
+// ==========================================
 
 /**
  * @swagger
- * /settings:
+ * /settings/banners:
  *   get:
- *     summary: Get System Settings
- *     description: Returns global system settings covering General, Delivery, Payment, SMTP, and Maintenance configurations. Sensitive fields (e.g. smtpPassword) are strictly masked/omitted. Only accessible by ADMIN and SUPER_ADMIN.
+ *     summary: Get Homepage Banners / Carousel Items
+ *     description: Returns homepage banners ordered by displayOrder ASC. Public requests receive active banners (isActive = true). Admin users can query all banners including inactive ones.
  *     tags: [Settings]
- *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: page, schema: { type: integer, default: 1 } }
+ *       - { in: query, name: limit, schema: { type: integer, default: 20 } }
+ *       - { in: query, name: search, schema: { type: string } }
+ *       - { in: query, name: isActive, schema: { type: boolean } }
+ *       - { in: query, name: sortBy, schema: { type: string, enum: [displayOrder, createdAt, title], default: displayOrder } }
+ *       - { in: query, name: sortOrder, schema: { type: string, enum: [asc, desc], default: asc } }
  *     responses:
  *       200:
- *         description: Settings retrieved successfully
+ *         description: Banners retrieved successfully
+ */
+router.get("/banners", optionalAuthenticate, getBannersHandler);
+
+/**
+ * @swagger
+ * /settings/banners/{id}:
+ *   get:
+ *     summary: Get Banner Details
+ *     tags: [Settings]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     responses:
+ *       200: { description: Banner details retrieved successfully }
+ *       404: { description: Banner not found }
+ */
+router.get("/banners/:id", optionalAuthenticate, getBannerByIdHandler);
+
+/**
+ * @swagger
+ * /settings/banners:
+ *   post:
+ *     summary: Create / Upload Homepage Banner
+ *     description: Uploads a new homepage banner. Only accessible by ADMIN and SUPER_ADMIN.
+ *     tags: [Settings]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               image: { type: string, format: binary, description: "Banner image file" }
+ *               title: { type: string, example: "Mega Summer Sale" }
+ *               subtitle: { type: string, example: "Up to 50% Off on Electronics" }
+ *               buttonText: { type: string, example: "Shop Now" }
+ *               buttonUrl: { type: string, example: "/category/electronics" }
+ *               displayOrder: { type: integer, example: 1 }
+ *               isActive: { type: boolean, example: true }
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [image]
+ *             properties:
+ *               image: { type: string, example: "/uploads/products/banners/banner1.jpg" }
+ *               title: { type: string, example: "Mega Summer Sale" }
+ *               subtitle: { type: string, example: "Up to 50% Off on Electronics" }
+ *               buttonText: { type: string, example: "Shop Now" }
+ *               buttonUrl: { type: string, example: "/category/electronics" }
+ *               displayOrder: { type: integer, example: 1 }
+ *               isActive: { type: boolean, example: true }
+ *     responses:
+ *       201: { description: Banner created successfully }
+ *       400: { description: Validation error }
  *       401: { description: Authentication required }
  *       403: { description: Admin access required }
  */
-router.get("/", getSettingsHandler);
+router.post(
+  "/banners",
+  authenticate,
+  authorizeRoles("ADMIN", "SUPER_ADMIN"),
+  bannerUpload,
+  mapBannerUploadToBody,
+  validateRequest(createBannerValidationSchema),
+  createBannerHandler
+);
+
+/**
+ * @swagger
+ * /settings/banners/{id}:
+ *   patch:
+ *     summary: Update Homepage Banner
+ *     description: Updates banner fields, image, display order, or active status. Only accessible by ADMIN and SUPER_ADMIN.
+ *     tags: [Settings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               image: { type: string, format: binary }
+ *               title: { type: string }
+ *               subtitle: { type: string }
+ *               buttonText: { type: string }
+ *               buttonUrl: { type: string }
+ *               displayOrder: { type: integer }
+ *               isActive: { type: boolean }
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title: { type: string }
+ *               subtitle: { type: string }
+ *               image: { type: string }
+ *               buttonText: { type: string }
+ *               buttonUrl: { type: string }
+ *               displayOrder: { type: integer }
+ *               isActive: { type: boolean }
+ *     responses:
+ *       200: { description: Banner updated successfully }
+ *       404: { description: Banner not found }
+ */
+router.patch(
+  "/banners/:id",
+  authenticate,
+  authorizeRoles("ADMIN", "SUPER_ADMIN"),
+  bannerUpload,
+  mapBannerUploadToBody,
+  validateRequest(updateBannerValidationSchema),
+  updateBannerHandler
+);
+
+/**
+ * @swagger
+ * /settings/banners/{id}:
+ *   delete:
+ *     summary: Soft Delete Homepage Banner
+ *     description: Soft deletes a homepage banner by setting deletedAt timestamp and isActive = false. Only accessible by ADMIN and SUPER_ADMIN.
+ *     tags: [Settings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     responses:
+ *       200: { description: Banner deleted successfully }
+ *       404: { description: Banner not found }
+ */
+router.delete(
+  "/banners/:id",
+  authenticate,
+  authorizeRoles("ADMIN", "SUPER_ADMIN"),
+  deleteBannerHandler
+);
+
+// ==========================================
+// 2. APP SYSTEM SETTINGS & CATEGORY DISCOUNTS
+// ==========================================
+
+router.get("/", authenticate, authorizeRoles("ADMIN", "SUPER_ADMIN"), getSettingsHandler);
 
 /**
  * @swagger
@@ -72,7 +230,13 @@ router.get("/", getSettingsHandler);
  *       401: { description: Authentication required }
  *       403: { description: Admin access required }
  */
-router.patch("/", validateRequest(updateSettingsValidationSchema), updateSettingsHandler);
+router.patch(
+  "/",
+  authenticate,
+  authorizeRoles("ADMIN", "SUPER_ADMIN"),
+  validateRequest(updateSettingsValidationSchema),
+  updateSettingsHandler
+);
 
 /**
  * @swagger
@@ -86,7 +250,12 @@ router.patch("/", validateRequest(updateSettingsValidationSchema), updateSetting
  *       200:
  *         description: Category discounts retrieved successfully
  */
-router.get("/category-discounts", getCategoryDiscountsHandler);
+router.get(
+  "/category-discounts",
+  authenticate,
+  authorizeRoles("ADMIN", "SUPER_ADMIN"),
+  getCategoryDiscountsHandler
+);
 
 /**
  * @swagger
@@ -111,6 +280,11 @@ router.get("/category-discounts", getCategoryDiscountsHandler);
  *       200:
  *         description: Category discount updated successfully
  */
-router.patch("/category-discounts/:categoryId", updateCategoryDiscountHandler);
+router.patch(
+  "/category-discounts/:categoryId",
+  authenticate,
+  authorizeRoles("ADMIN", "SUPER_ADMIN"),
+  updateCategoryDiscountHandler
+);
 
 export default router;
