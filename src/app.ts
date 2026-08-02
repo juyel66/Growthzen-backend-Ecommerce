@@ -1,5 +1,6 @@
 import express, { type Express } from "express";
-import cors from "cors";
+import cors, { type CorsOptions } from "cors";
+import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import morgan from "morgan";
 import path from "path";
@@ -9,11 +10,50 @@ import { errorHandler } from "./middlewares/errorHandler";
 
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./config/swagger";
+import { checkMaintenanceMode } from "./middlewares/maintenance.middleware";
+
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "http://127.0.0.1:3000",
+].filter(Boolean) as string[];
+
+const corsOptions: CorsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g. mobile apps, curl, same-origin postman)
+    if (!origin) return callback(null, true);
+
+    if (
+      allowedOrigins.includes(origin) ||
+      allowedOrigins.some((allowed) => origin.startsWith(allowed))
+    ) {
+      return callback(null, true);
+    }
+
+    return callback(
+      new Error(`CORS policy violation: Origin ${origin} is not allowed by CORS`)
+    );
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Authorization",
+    "Content-Type",
+    "Accept",
+    "Origin",
+    "Cookie",
+    "X-Requested-With",
+  ],
+  exposedHeaders: ["Set-Cookie"],
+  optionsSuccessStatus: 200,
+};
 
 const app: Express = express();
 
-app.use(cors());
-app.use(helmet());
+app.use(cors(corsOptions));
+app.use(cookieParser());
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(morgan("dev"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -42,8 +82,6 @@ app.use(
     explorer: true,
   })
 );
-
-import { checkMaintenanceMode } from "./middlewares/maintenance.middleware";
 
 /**
  * API Routes
