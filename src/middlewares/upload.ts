@@ -11,6 +11,7 @@ const uploadFolders = {
   productImages: "images",
   productVideos: "videos",
   reviewImages: "reviews",
+  image: "banners",
 } as const;
 
 const imageMimeTypes = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
@@ -40,7 +41,7 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter: multer.Options["fileFilter"] = (_req, file, callback) => {
-  if (file.fieldname === "thumbnailImage" || file.fieldname === "productImages" || file.fieldname === "reviewImages") {
+  if (file.fieldname === "thumbnailImage" || file.fieldname === "productImages" || file.fieldname === "reviewImages" || file.fieldname === "image") {
     if (!imageMimeTypes.has(file.mimetype.toLowerCase())) {
       callback(new AppError(400, "Only jpg, jpeg, png, and webp images are allowed"));
       return;
@@ -115,6 +116,10 @@ export const reviewUpload = upload.fields([
   { name: "reviewImages", maxCount: 10 },
 ]);
 
+export const bannerUpload = upload.fields([
+  { name: "image", maxCount: 1 },
+]);
+
 export const mapProductUploadToBody = (req: Request, _res: Response, next: NextFunction): void => {
   const files = req.files as Record<string, Express.Multer.File[]> | undefined;
 
@@ -162,6 +167,23 @@ export const mapReviewUploadToBody = (req: Request, _res: Response, next: NextFu
     req.body.images = reviewFiles.map((file) => toFileUrl(uploadFolders.reviewImages, file.filename));
   } else if (req.body.images !== undefined) {
     req.body.images = ensureStringArray(req.body.images);
+  }
+
+  next();
+};
+
+export const mapBannerUploadToBody = (req: Request, _res: Response, next: NextFunction): void => {
+  const files = req.files as Record<string, Express.Multer.File[]> | undefined;
+
+  if (!files) {
+    next();
+    return;
+  }
+
+  const bannerFile = files.image?.[0];
+
+  if (bannerFile) {
+    req.body.image = toFileUrl(uploadFolders.image, bannerFile.filename);
   }
 
   next();
