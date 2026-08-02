@@ -46,7 +46,7 @@ app.use(
 import { checkMaintenanceMode } from "./middlewares/maintenance.middleware";
 
 /**
-//  * API Routes
+ * API Routes
  */
 app.use("/api/v1", checkMaintenanceMode, apiRoutes);
 
