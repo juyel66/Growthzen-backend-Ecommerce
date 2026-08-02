@@ -5,7 +5,6 @@ import { syncSuperAdminAccount } from "./modules/auth/auth.service";
 import { migrateLegacyProductCategories } from "./modules/categories/category.migration";
 
 
-// Set the port from environment variable or default to 5000
 const port = Number(process.env.PORT) || 5000;
 
 const startServer = async (): Promise<void> => {
