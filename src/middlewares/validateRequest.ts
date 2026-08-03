@@ -7,7 +7,15 @@ const validateRequest = (schema: ZodTypeAny) => {
     const result = schema.safeParse(req.body);
 
     if (!result.success) {
-      next(new AppError(400, result.error.issues[0]?.message ?? "Invalid request body"));
+      const issue = result.error.issues[0];
+      const fieldPath = issue?.path && issue.path.length > 0 ? issue.path.join(".") : null;
+      let message = issue?.message ?? "Invalid request body";
+
+      if (fieldPath && !message.toLowerCase().includes(fieldPath.toLowerCase())) {
+        message = `${fieldPath}: ${message}`;
+      }
+
+      next(new AppError(400, message));
       return;
     }
 
