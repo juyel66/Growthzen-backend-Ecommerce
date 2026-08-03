@@ -1,11 +1,25 @@
 import type { NextFunction, Request, Response } from "express";
+import multer from "multer";
 import AppError from "../utils/AppError";
+import { MAX_IMAGE_SIZE_MB } from "./upload";
 
 export const errorHandler = (error: unknown, _req: Request, res: Response, _next: NextFunction): Response => {
   if (error instanceof AppError) {
     return res.status(error.statusCode).json({
       success: false,
       message: error.message,
+      error: null,
+    });
+  }
+
+  if (error instanceof multer.MulterError) {
+    const message = error.code === "LIMIT_FILE_SIZE"
+      ? `Maximum image size is ${MAX_IMAGE_SIZE_MB} MB`
+      : error.message;
+
+    return res.status(400).json({
+      success: false,
+      message,
       error: null,
     });
   }
