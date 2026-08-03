@@ -18,20 +18,49 @@ const positiveNumber = (label: string) => z.preprocess(
   z.number({ error: `${label} is required` }).finite().positive(`${label} must be greater than 0`),
 );
 
-const optionalNonnegativeNumber = (label: string, max?: number) => z.preprocess(
+const optionalNullableNumber = (label: string, max?: number) => z.preprocess(
   (value) => {
-    const normalized = emptyToUndefined(value);
-    return typeof normalized === "string" ? Number(normalized) : normalized;
+    if (value === undefined || value === null) return value;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "" || trimmed === "null" || trimmed === "undefined") return null;
+      const num = Number(trimmed);
+      return Number.isNaN(num) ? value : num;
+    }
+    return value;
   },
-  z.number().finite().nonnegative(`${label} cannot be negative`).max(max ?? Number.MAX_SAFE_INTEGER).optional().nullable(),
+  z.number({ message: `${label} must be a valid number` })
+    .finite(`${label} must be finite`)
+    .nonnegative(`${label} cannot be negative`)
+    .max(max ?? Number.MAX_SAFE_INTEGER, `${label} cannot exceed ${max}`)
+    .optional()
+    .nullable(),
 );
 
-const optionalPositiveNumber = (label: string) => z.preprocess(
+const optionalNullableText = (max: number) => z.preprocess(
   (value) => {
-    const normalized = emptyToUndefined(value);
-    return typeof normalized === "string" ? Number(normalized) : normalized;
+    if (value === undefined || value === null) return value;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "" || trimmed === "null" || trimmed === "undefined") return null;
+      return trimmed;
+    }
+    return value;
   },
-  z.number().finite().positive(`${label} must be greater than 0`).optional().nullable(),
+  z.string().trim().min(1).max(max).optional().nullable(),
+);
+
+const optionalNullableEnum = <T extends [string, ...string[]]>(values: T) => z.preprocess(
+  (value) => {
+    if (value === undefined || value === null) return value;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "" || trimmed === "null" || trimmed === "undefined") return null;
+      return trimmed;
+    }
+    return value;
+  },
+  z.enum(values).optional().nullable(),
 );
 
 const stringArray = (max: number, label: string) => z.preprocess((value) => {
@@ -47,14 +76,9 @@ const stringArray = (max: number, label: string) => z.preprocess((value) => {
   return text.split(",").map((item) => item.trim()).filter(Boolean);
 }, z.array(z.string().trim().min(1).max(500)).max(max, `Maximum ${max} ${label} allowed`));
 
-const mediaPath = (extensions: string[], label: string) => z.string().trim().min(1, `${label} is required`).max(2048)
-  .refine((value) => {
-    const cleanPath = value.split(/[?#]/, 1)[0]?.toLowerCase() ?? "";
-    return extensions.some((extension) => cleanPath.endsWith(extension));
-  }, `Unsupported ${label.toLowerCase()} format`);
-
-const imagePath = mediaPath([".jpg", ".jpeg", ".png", ".webp"], "Image");
-const videoPath = mediaPath([".mp4", ".mov", ".webm"], "Video");
+export const ALLOWED_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif", ".svg"];
+const imagePath = z.string().trim().min(1, "Image URL is required").max(2048);
+const videoPath = z.string().trim().min(1, "Video URL is required").max(2048);
 
 export const productAttributeSchema = z.object({
   name: z.string().trim().min(1, "Attribute name is required").max(50),
@@ -81,8 +105,6 @@ const attributesSchema = z.preprocess((value) => {
     });
   });
 
-const nullableText = (max: number) => z.preprocess(emptyToUndefined, z.string().trim().min(1).max(max).optional().nullable());
-
 const productFields = {
   title: z.string().trim().min(2).max(200),
   shortDescription: z.string().trim().min(10).max(500),
@@ -92,13 +114,13 @@ const productFields = {
   costPrice: positiveNumber("Cost price"),
   customerSellPrice: positiveNumber("Customer sell price"),
   resellerPrice: positiveNumber("Reseller price"),
-  salePrice: optionalPositiveNumber("Sale price"),
-  discountType: z.preprocess(emptyToUndefined, z.enum(["PERCENTAGE", "FIXED"]).optional().nullable()),
-  discountValue: optionalNonnegativeNumber("Discount value"),
-  taxRate: optionalNonnegativeNumber("Tax rate", 100),
-  couponCode: nullableText(100),
+  salePrice: optionalNullableNumber("Sale price"),
+  discountType: optionalNullableEnum(["PERCENTAGE", "FIXED"]),
+  discountValue: optionalNullableNumber("Discount value"),
+  taxRate: optionalNullableNumber("Tax rate", 100),
+  couponCode: optionalNullableText(100),
   productCode: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/, "Product code contains invalid characters"),
-  barcode: nullableText(100),
+  barcode: optionalNullableText(100),
   attributes: attributesSchema.optional(),
   enableSize: booleanField.optional(),
   availableSizes: stringArray(PRODUCT_SIZES.length, "sizes")
@@ -108,7 +130,11 @@ const productFields = {
   thumbnailImage: imagePath,
   productImages: stringArray(10, "gallery images").pipe(z.array(imagePath)).optional(),
   productVideos: stringArray(5, "product videos").pipe(z.array(videoPath)).optional(),
+  deletedProductImages: stringArray(10, "deleted gallery images").pipe(z.array(imagePath)).optional(),
+  deleteThumbnail: booleanField.optional(),
   isFeatured: booleanField.optional(),
+  specialSaleEnabled: booleanField.optional(),
+  discountEnabled: booleanField.optional(),
 };
 
 const pricingRules = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) => schema.superRefine((data, context) => {
@@ -120,8 +146,9 @@ const pricingRules = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) => schema
   };
   const discountType = pricing.discountType as string | null | undefined;
   const discountValue = pricing.discountValue as number | null | undefined;
-  if ((discountType && typeof discountValue !== "number") || (!discountType && typeof discountValue === "number")) {
-    context.addIssue({ code: "custom", path: ["discountValue"], message: "discountType and discountValue must be provided together" });
+
+  if (typeof discountValue === "number" && discountValue > 0 && !discountType) {
+    context.addIssue({ code: "custom", path: ["discountType"], message: "discountType is required when discountValue is greater than 0" });
   }
   if (discountType === "PERCENTAGE" && typeof discountValue === "number" && discountValue > 100) {
     context.addIssue({ code: "custom", path: ["discountValue"], message: "Percentage discount cannot exceed 100" });
