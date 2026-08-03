@@ -3,8 +3,17 @@ import path from "path";
 import type { Prisma, Role } from "@prisma/client";
 import prismaClient from "../../config/prisma";
 import AppError from "../../utils/AppError";
+import {
+  BASE_URL,
+  formatPublicUrl,
+  formatPublicUrlArray,
+  logImageFlow,
+  toRelativePath,
+} from "../../utils/imageUrl";
+import { deleteFileFromStorage } from "../../services/storage.service";
 import type { ProductAttribute, ProductCreateInput, ProductUpdateInput, ProductView } from "./products.interface";
 import { normalizeProductCategory } from "./products.category";
+import { calculateFinalPrice } from "../pricing/pricing.service";
 
 const productInclude = {
   createdBy: { select: { name: true, email: true } },
@@ -84,11 +93,27 @@ const mapProduct = (product: ProductRecord, viewerRole?: Role): ProductView => {
   const attributes = parseAttributes(product.attributes);
   const sizeAttribute = attributes.find(isSizeAttribute);
 
-  // Dynamic Category Discount Calculation
-  const categoryDiscount = product.categoryRel?.discountEnabled ? (product.categoryRel.discountPercentage ?? 0) : 0;
-  const originalPrice = product.customerSellPrice;
-  const discountAmount = Number(((originalPrice * categoryDiscount) / 100).toFixed(2));
-  const finalPrice = Math.max(0, Number((originalPrice - discountAmount).toFixed(2)));
+  // Centralized Pricing Calculation
+  const price = calculateFinalPrice(product, viewerRole);
+
+  const rawThumbnail = toRelativePath(product.thumbnailImage) || (Array.isArray(product.productImages) && product.productImages[0] ? toRelativePath(product.productImages[0]) : "");
+  let thumbnailImage = formatPublicUrl(rawThumbnail);
+  if (!thumbnailImage) {
+    thumbnailImage = `${BASE_URL}/uploads/products/thumbnails/default-product.webp`;
+  }
+
+  const productImages = formatPublicUrlArray(Array.isArray(product.productImages) ? product.productImages : []);
+  const productVideos = formatPublicUrlArray(Array.isArray(product.productVideos) ? product.productVideos : []);
+
+  logImageFlow(`mapProduct [${product.id}]`, {
+    dbThumbnail: product.thumbnailImage,
+    dbProductImages: product.productImages,
+    dbProductVideos: product.productVideos,
+  }, {
+    responseThumbnail: thumbnailImage,
+    responseProductImages: productImages,
+    responseProductVideos: productVideos,
+  });
 
   return {
     id: product.id,
@@ -111,10 +136,10 @@ const mapProduct = (product: ProductRecord, viewerRole?: Role): ProductView => {
       : null,
     ...(isAdmin ? { costPrice: product.costPrice } : {}),
     customerSellPrice: product.customerSellPrice,
-    originalPrice,
-    categoryDiscount,
-    discountAmount,
-    finalPrice,
+    originalPrice: price.originalPrice,
+    categoryDiscount: price.categoryDiscount,
+    discountAmount: price.discountAmount,
+    finalPrice: price.finalPrice,
     ...(isAdmin || isReseller ? { resellerPrice: product.resellerPrice } : {}),
     salePrice: product.salePrice,
     discountType: product.discountType,
@@ -124,11 +149,13 @@ const mapProduct = (product: ProductRecord, viewerRole?: Role): ProductView => {
     attributes,
     enableSize: Boolean(sizeAttribute?.values.length),
     availableSizes: sizeAttribute?.values ?? [],
-    thumbnailImage: product.thumbnailImage,
-    productImages: product.productImages,
-    productVideos: product.productVideos,
+    thumbnailImage,
+    productImages,
+    productVideos,
     status: product.status,
     isFeatured: product.isFeatured,
+    specialSaleEnabled: product.specialSaleEnabled ?? false,
+    discountEnabled: product.discountEnabled ?? false,
     averageRating: product.reviews.length ? Number((ratingTotal / product.reviews.length).toFixed(2)) : 0,
     reviewCount: product.reviews.length,
     ratingBreakdown: breakdown,
@@ -137,7 +164,7 @@ const mapProduct = (product: ProductRecord, viewerRole?: Role): ProductView => {
       reviewerName: review.user.name,
       rating: review.rating,
       comment: review.comment,
-      images: review.images,
+      images: formatPublicUrlArray(review.images ?? []),
       createdAt: review.createdAt,
     })),
     createdAt: product.createdAt,
@@ -207,31 +234,37 @@ const toCreateData = (
   slug: string,
   createdById: string,
   resolvedCategory: { categoryId: string; categoryName: string }
-): Prisma.ProductCreateInput => ({
-  title: payload.title,
-  shortDescription: payload.shortDescription,
-  description: payload.description,
-  slug,
-  productCode: payload.productCode,
-  barcode: payload.barcode ?? null,
-  category: resolvedCategory.categoryName,
-  categoryRel: { connect: { id: resolvedCategory.categoryId } },
-  costPrice: payload.costPrice,
-  customerSellPrice: payload.customerSellPrice,
-  resellerPrice: payload.resellerPrice,
-  salePrice: payload.salePrice ?? null,
-  discountType: payload.discountType ?? null,
-  discountValue: payload.discountValue ?? null,
-  taxRate: payload.taxRate ?? null,
-  couponCode: payload.couponCode ?? null,
-  attributes: configureSizeAttribute(payload.attributes ?? [], payload.enableSize, payload.availableSizes) as unknown as Prisma.InputJsonValue,
-  status: payload.status ?? "DRAFT",
-  thumbnailImage: payload.thumbnailImage,
-  productImages: payload.productImages ?? [],
-  productVideos: payload.productVideos ?? [],
-  isFeatured: payload.isFeatured ?? false,
-  createdBy: { connect: { id: createdById } },
-});
+): Prisma.ProductCreateInput => {
+  const specialSaleEnabled = payload.specialSaleEnabled ?? false;
+  const discountEnabled = payload.discountEnabled ?? false;
+  return {
+    title: payload.title,
+    shortDescription: payload.shortDescription,
+    description: payload.description,
+    slug,
+    productCode: payload.productCode,
+    barcode: payload.barcode ?? null,
+    category: resolvedCategory.categoryName,
+    categoryRel: { connect: { id: resolvedCategory.categoryId } },
+    costPrice: payload.costPrice,
+    customerSellPrice: payload.customerSellPrice,
+    resellerPrice: payload.resellerPrice,
+    specialSaleEnabled,
+    discountEnabled,
+    salePrice: specialSaleEnabled ? (payload.salePrice ?? null) : null,
+    discountType: payload.discountType ?? null,
+    discountValue: payload.discountValue ?? null,
+    taxRate: payload.taxRate ?? null,
+    couponCode: payload.couponCode ?? null,
+    attributes: configureSizeAttribute(payload.attributes ?? [], payload.enableSize, payload.availableSizes) as unknown as Prisma.InputJsonValue,
+    status: payload.status ?? "DRAFT",
+    thumbnailImage: toRelativePath(payload.thumbnailImage),
+    productImages: (payload.productImages ?? []).map(toRelativePath).filter(Boolean),
+    productVideos: (payload.productVideos ?? []).map(toRelativePath).filter(Boolean),
+    isFeatured: payload.isFeatured ?? false,
+    createdBy: { connect: { id: createdById } },
+  };
+};
 
 export const createProduct = async (payload: ProductCreateInput, createdById: string): Promise<ProductView> => {
   await assertUniqueIdentifiers(payload.productCode, payload.barcode);
@@ -262,7 +295,10 @@ export const updateProduct = async (id: string, payload: ProductUpdateInput): Pr
   if (!existing) throw new AppError(404, "Product not found");
   await assertUniqueIdentifiers(payload.productCode, payload.barcode, id);
 
-  const { attributes, enableSize, availableSizes, title, categoryId, category, ...fields } = payload;
+  const { attributes, enableSize, availableSizes, title, categoryId, category, deletedProductImages, deleteThumbnail, ...fields } = payload;
+  if (fields.specialSaleEnabled === false) {
+    fields.salePrice = null;
+  }
   const nextAttributes = attributes !== undefined || enableSize !== undefined
     ? configureSizeAttribute(attributes ?? parseAttributes(existing.attributes), enableSize, availableSizes)
     : undefined;
@@ -272,8 +308,55 @@ export const updateProduct = async (id: string, payload: ProductUpdateInput): Pr
     resolvedCategory = await resolveAndValidateCategory(categoryId, category);
   }
 
+  let nextThumbnailImage: string | undefined;
+  if (deleteThumbnail) {
+    await deleteFileFromStorage(existing.thumbnailImage);
+    nextThumbnailImage = "";
+  } else if (payload.thumbnailImage !== undefined) {
+    const rel = toRelativePath(payload.thumbnailImage);
+    if (rel) {
+      nextThumbnailImage = rel;
+    }
+  }
+
+  // Handle explicit deletedProductImages
+  let currentImages = existing.productImages.map(toRelativePath).filter(Boolean);
+  if (deletedProductImages && Array.isArray(deletedProductImages) && deletedProductImages.length > 0) {
+    const deletedRelSet = new Set(deletedProductImages.map(toRelativePath).filter(Boolean));
+    for (const imgToDelete of deletedRelSet) {
+      await deleteFileFromStorage(imgToDelete);
+    }
+    currentImages = currentImages.filter((img) => !deletedRelSet.has(img));
+  }
+
+  let nextProductImages: string[] | undefined;
+  if (payload.productImages !== undefined) {
+    const normalizedPayload = payload.productImages.map(toRelativePath).filter(Boolean);
+    if (normalizedPayload.length > 0) {
+      nextProductImages = Array.from(new Set([...currentImages, ...normalizedPayload]));
+    } else if (payload.productImages.length === 0) {
+      nextProductImages = [];
+    }
+  } else if (deletedProductImages && deletedProductImages.length > 0) {
+    nextProductImages = currentImages;
+  }
+
+  let nextProductVideos: string[] | undefined;
+  if (payload.productVideos !== undefined) {
+    const normalizedPayload = payload.productVideos.map(toRelativePath).filter(Boolean);
+    if (normalizedPayload.length > 0) {
+      const existingRel = existing.productVideos.map(toRelativePath).filter(Boolean);
+      nextProductVideos = Array.from(new Set([...existingRel, ...normalizedPayload]));
+    } else if (payload.productVideos.length === 0) {
+      nextProductVideos = [];
+    }
+  }
+
   const data: Prisma.ProductUpdateInput = {
     ...fields,
+    ...(nextThumbnailImage !== undefined ? { thumbnailImage: nextThumbnailImage } : {}),
+    ...(nextProductImages !== undefined ? { productImages: nextProductImages } : {}),
+    ...(nextProductVideos !== undefined ? { productVideos: nextProductVideos } : {}),
     ...(nextAttributes !== undefined ? { attributes: nextAttributes as unknown as Prisma.InputJsonValue } : {}),
     ...(title ? { title, slug: await buildUniqueSlug(title, id) } : {}),
     ...(resolvedCategory ? {
@@ -284,12 +367,20 @@ export const updateProduct = async (id: string, payload: ProductUpdateInput): Pr
 
   const product = await prismaClient.product.update({ where: { id }, data, include: productInclude });
 
+  const existingThumbnailRel = toRelativePath(existing.thumbnailImage);
+  const existingImagesRel = existing.productImages.map(toRelativePath).filter(Boolean);
+  const existingVideosRel = existing.productVideos.map(toRelativePath).filter(Boolean);
+
   const obsoleteFiles = [
-    ...(payload.thumbnailImage && payload.thumbnailImage !== existing.thumbnailImage ? [existing.thumbnailImage] : []),
-    ...(payload.productImages ? existing.productImages.filter((file) => !payload.productImages?.includes(file)) : []),
-    ...(payload.productVideos ? existing.productVideos.filter((file) => !payload.productVideos?.includes(file)) : []),
+    ...(nextThumbnailImage && nextThumbnailImage !== existingThumbnailRel ? [existingThumbnailRel] : []),
+    ...(nextProductImages ? existingImagesRel.filter((file) => !nextProductImages?.includes(file)) : []),
+    ...(nextProductVideos ? existingVideosRel.filter((file) => !nextProductVideos?.includes(file)) : []),
   ];
-  await deleteLocalFiles(obsoleteFiles);
+
+  for (const obsolete of obsoleteFiles) {
+    await deleteFileFromStorage(obsolete);
+  }
+
   return mapProduct(product, "ADMIN");
 };
 
@@ -300,18 +391,14 @@ export const deleteProduct = async (id: string): Promise<void> => {
   });
   if (!product) throw new AppError(404, "Product not found");
   await prismaClient.product.delete({ where: { id } });
-  await deleteLocalFiles([product.thumbnailImage, ...product.productImages, ...product.productVideos]);
-};
 
-const deleteLocalFiles = async (filePaths: string[]): Promise<void> => {
-  const paths = [...new Set(filePaths
-    .filter((file) => file.startsWith("/uploads/") || file.startsWith("uploads/"))
-    .map((file) => path.resolve(process.cwd(), file.replace(/^\/+/, ""))))];
-  await Promise.all(paths.map(async (file) => {
-    try {
-      await fs.unlink(file);
-    } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
-    }
-  }));
+  const filesToDelete = [
+    product.thumbnailImage,
+    ...(Array.isArray(product.productImages) ? product.productImages : []),
+    ...(Array.isArray(product.productVideos) ? product.productVideos : []),
+  ].filter(Boolean);
+
+  for (const fileUrl of filesToDelete) {
+    await deleteFileFromStorage(fileUrl);
+  }
 };
