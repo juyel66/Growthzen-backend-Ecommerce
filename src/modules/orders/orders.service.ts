@@ -1,6 +1,7 @@
 import type { DeliveryArea, OrderStatus, Prisma, Role } from "@prisma/client";
 import prismaClient from "../../config/prisma";
 import AppError from "../../utils/AppError";
+import { calculateFinalPrice } from "../pricing/pricing.service";
 import sendEmail from "../../helpers/email";
 import {
   getAdminOrderCreatedEmail,
@@ -273,8 +274,14 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
       id: true,
       attributes: true,
       customerSellPrice: true,
+      salePrice: true,
+      specialSaleEnabled: true,
+      discountEnabled: true,
       resellerPrice: true,
+      discountType: true,
+      discountValue: true,
       productCode: true,
+      categoryRel: { select: { discountPercentage: true, discountEnabled: true } },
     },
   });
 
@@ -313,7 +320,8 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
       throw new AppError(400, `Invalid size selected for product ${item.productId}`);
     }
 
-    const unitPrice = getSellingPrice(orderRole, product.customerSellPrice, product.resellerPrice);
+    const calculated = calculateFinalPrice(product, orderRole);
+    const unitPrice = calculated.finalPrice;
     const totalPrice = roundToTwo(unitPrice * item.quantity);
 
     return {
