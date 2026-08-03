@@ -1,6 +1,7 @@
 import type { ReviewStatus } from "@prisma/client";
 import prismaClient from "../../config/prisma";
 import AppError from "../../utils/AppError";
+import { formatPublicUrl, formatPublicUrlArray } from "../../utils/imageUrl";
 import type { CreateReviewInput, ProductReviewStats, PublicReviewView, AdminReviewView } from "./reviews.interface";
 
 export const createReview = async (userId: string, payload: CreateReviewInput) => {
@@ -82,7 +83,7 @@ export const getProductReviews = async (productId: string): Promise<ProductRevie
     reviewerProfileImage: null,
     rating: r.rating,
     comment: r.comment ?? null,
-    images: r.images ?? [],
+    images: formatPublicUrlArray(r.images ?? []),
     createdAt: r.createdAt,
   }));
 
@@ -113,7 +114,7 @@ export const getMyReviews = async (userId: string) => {
     orderId: r.orderId,
     rating: r.rating,
     comment: r.comment ?? null,
-    images: r.images ?? [],
+    images: formatPublicUrlArray(r.images ?? []),
     status: r.status,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
@@ -142,7 +143,7 @@ export const adminListReviews = async () : Promise<AdminReviewView[]> => {
     customerPhone: r.order?.customerPhone ?? null,
     rating: r.rating,
     comment: r.comment ?? null,
-    images: r.images ?? [],
+    images: formatPublicUrlArray(r.images ?? []),
     status: r.status,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
@@ -161,7 +162,7 @@ export const updateReview = async (id: string, data: { rating?: number; comment?
     data: {
       rating: data.rating ?? undefined,
       comment: data.comment ?? undefined,
-      images: data.images ?? undefined,
+      images: data.images !== undefined ? data.images.map((img) => formatPublicUrl(img)).filter(Boolean) : undefined,
       status: data.status ?? undefined,
     },
   });
@@ -206,7 +207,7 @@ export const getReviewFormData = async (userId: string, orderItemId: string) => 
     orderCode: order.orderCode,
     productId: orderItem.productId,
     productName: orderItem.product?.title ?? null,
-    productImage: orderItem.product?.thumbnailImage ?? null,
+    productImage: formatPublicUrl(orderItem.product?.thumbnailImage),
     userName: null,
     userEmail: order.userEmail ?? null,
     rating: orderItem.review?.rating ?? null,
