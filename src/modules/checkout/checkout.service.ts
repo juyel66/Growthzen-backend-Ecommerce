@@ -207,29 +207,36 @@ export const checkout = async (user: CheckoutUser, payload: CheckoutInput, key: 
   });
   if (prior) return mapOrder(prior, user);
 
+  // Pre-fetch shipping options and explicit coupon outside transaction in parallel
+  const [shipping, explicitCoupon] = await Promise.all([
+    resolveShipping(payload.deliveryArea, payload.shippingMethodId),
+    payload.couponCode
+      ? prismaClient.coupon.findFirst({
+          where: { code: payload.couponCode.trim().toUpperCase(), deletedAt: null },
+          include: couponInclude,
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (payload.couponCode && !explicitCoupon) {
+    throw new AppError(404, "Coupon not found");
+  }
+
   let order: OrderRecord | null = null;
   for (let attempt = 0; attempt < 3 && !order; attempt += 1) {
     try {
       order = await prismaClient.$transaction(
         async (db) => {
-          await validatePaymentMethodSetting(payload.paymentMethod, db);
           const cart = validCart(await db.cart.findUnique({ where: { userId: user.id }, select: cartSelect }));
-          let coupon: CouponRecord | null = cart.appliedCoupon;
-          if (payload.couponCode) {
-            coupon = await db.coupon.findFirst({
-              where: { code: payload.couponCode.trim().toUpperCase(), deletedAt: null },
-              include: couponInclude,
-            });
-            if (!coupon) throw new AppError(404, "Coupon not found");
-          }
-          const shipping = await resolveShipping(payload.deliveryArea, payload.shippingMethodId, db);
+          const coupon: CouponRecord | null = explicitCoupon || cart.appliedCoupon;
           const evaluated = coupon ? await evaluateCoupon(coupon, user.id, cart, user.role, db) : null;
           if (coupon && !cart.appliedCoupon) Object.assign(cart, { appliedCoupon: coupon });
           const totals = summary(cart, user, shipping, evaluated?.discountAmount ?? 0);
           const estimated = shipping.estimatedDeliveryDays === null ? null : new Date(Date.now() + shipping.estimatedDeliveryDays * 86400000);
+          const code = await orderNumber(db);
           const created = await db.order.create({
             data: {
-              orderCode: await orderNumber(db),
+              orderCode: code,
               idempotencyKey: scoped,
               userId: user.id,
               userEmail: user.email,
@@ -263,14 +270,15 @@ export const checkout = async (user: CheckoutUser, payload: CheckoutInput, key: 
             },
             include: orderInclude,
           });
-          if (evaluated)
+          if (evaluated) {
             await db.couponUsage.create({
               data: { couponId: evaluated.couponId, userId: user.id, orderId: created.id, discountAmount: evaluated.discountAmount },
             });
+          }
           await db.cart.update({ where: { id: cart.id }, data: { appliedCouponId: null, items: { deleteMany: {} } } });
           return created;
         },
-        { isolationLevel: "Serializable" }
+        { timeout: 10000 }
       );
     } catch (error: unknown) {
       const code = (error as { code?: string }).code;
