@@ -46,6 +46,8 @@ model Product {
   thumbnailImage    String
   productImages     String[]
   isFeatured        Boolean         @default(false)
+  specialSaleEnabled Boolean        @default(false)
+  discountEnabled   Boolean        @default(false)
   createdById       String?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
