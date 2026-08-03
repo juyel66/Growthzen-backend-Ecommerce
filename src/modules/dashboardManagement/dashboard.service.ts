@@ -1,6 +1,7 @@
 import type { OrderStatus, PaymentMethod, PaymentStatus, Prisma } from "@prisma/client";
 
 import prismaClient from "../../config/prisma";
+import { formatPublicUrl } from "../../utils/imageUrl";
 import type {
   DashboardCharts,
   DashboardCustomerAnalytics,
@@ -502,7 +503,7 @@ const mapTopSellingProducts = async (query: DashboardQuery): Promise<DashboardTo
       productId: item.productId,
       productName: product?.title ?? "Unknown Product",
       slug: product?.slug ?? item.productId,
-      thumbnailImage: product?.thumbnailImage ?? "",
+      thumbnailImage: formatPublicUrl(product?.thumbnailImage),
       soldQuantity: item._sum.quantity ?? 0,
       revenue: roundToTwo(item._sum.totalPrice ?? 0),
     };
