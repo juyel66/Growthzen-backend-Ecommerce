@@ -1,6 +1,8 @@
 import type { Prisma, Role } from "@prisma/client";
 import AppError from "../../utils/AppError";
 import prismaClient from "../../config/prisma";
+import { calculateFinalPrice, type CalculatedPrice } from "../pricing/pricing.service";
+import { BASE_URL, formatPublicUrl } from "../../utils/imageUrl";
 
 export const commerceProductSelect = {
   id: true,
@@ -11,10 +13,13 @@ export const commerceProductSelect = {
   shortDescription: true,
   customerSellPrice: true,
   salePrice: true,
+  specialSaleEnabled: true,
+  discountEnabled: true,
   resellerPrice: true,
   discountType: true,
   discountValue: true,
   status: true,
+  categoryRel: { select: { discountPercentage: true, discountEnabled: true } },
 } satisfies Prisma.ProductSelect;
 
 export type CommerceProductRecord = Prisma.ProductGetPayload<{ select: typeof commerceProductSelect }>;
@@ -28,55 +33,39 @@ export interface CommerceProductView {
   shortDescription: string;
   customerSellPrice: number;
   salePrice: number | null;
+  specialSaleEnabled: boolean;
+  discountEnabled: boolean;
   resellerPrice?: number;
   status: CommerceProductRecord["status"];
 }
 
-export interface ProductPrice {
-  basePrice: number;
-  sellingPrice: number;
-  discount: number;
-}
+export type ProductPrice = CalculatedPrice;
 
-const roundMoney = (value: number): number => Number(value.toFixed(2));
-
-export const mapCommerceProduct = (product: CommerceProductRecord, role: Role): CommerceProductView => ({
-  id: product.id,
-  title: product.title,
-  slug: product.slug,
-  thumbnailImage: product.thumbnailImage,
-  productCode: product.productCode,
-  shortDescription: product.shortDescription,
-  customerSellPrice: product.customerSellPrice,
-  salePrice: product.salePrice,
-  ...(role === "RESELLER" || role === "ADMIN" || role === "SUPER_ADMIN"
-    ? { resellerPrice: product.resellerPrice }
-    : {}),
-  status: product.status,
-});
+export const mapCommerceProduct = (product: CommerceProductRecord, role: Role): CommerceProductView => {
+  let thumbnailImage = formatPublicUrl(product.thumbnailImage);
+  if (!thumbnailImage) {
+    thumbnailImage = `${BASE_URL}/uploads/products/thumbnails/default-product.webp`;
+  }
+  return {
+    id: product.id,
+    title: product.title,
+    slug: product.slug,
+    thumbnailImage,
+    productCode: product.productCode,
+    shortDescription: product.shortDescription,
+    customerSellPrice: product.customerSellPrice,
+    salePrice: product.salePrice,
+    specialSaleEnabled: product.specialSaleEnabled,
+    discountEnabled: product.discountEnabled,
+    ...(role === "RESELLER" || role === "ADMIN" || role === "SUPER_ADMIN"
+      ? { resellerPrice: product.resellerPrice }
+      : {}),
+    status: product.status,
+  };
+};
 
 export const calculateProductPrice = (product: CommerceProductRecord, role: Role): ProductPrice => {
-  if (role === "RESELLER") {
-    return { basePrice: product.resellerPrice, sellingPrice: product.resellerPrice, discount: 0 };
-  }
-
-  const basePrice = product.customerSellPrice;
-  let sellingPrice = basePrice;
-
-  if (product.salePrice !== null) {
-    sellingPrice = Math.min(basePrice, product.salePrice);
-  } else if (product.discountType && product.discountValue !== null) {
-    const discount = product.discountType === "PERCENTAGE"
-      ? (basePrice * product.discountValue) / 100
-      : product.discountValue;
-    sellingPrice = Math.max(0, basePrice - discount);
-  }
-
-  return {
-    basePrice: roundMoney(basePrice),
-    sellingPrice: roundMoney(sellingPrice),
-    discount: roundMoney(basePrice - sellingPrice),
-  };
+  return calculateFinalPrice(product, role);
 };
 
 export const getActiveCommerceProduct = async (productId: string): Promise<CommerceProductRecord> => {
