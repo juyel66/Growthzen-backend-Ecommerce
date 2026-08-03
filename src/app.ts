@@ -44,8 +44,14 @@ const corsOptions: CorsOptions = {
     "Origin",
     "Cookie",
     "X-Requested-With",
+    "Idempotency-Key",
+    "idempotency-key",
+    "X-Idempotency-Key",
+    "x-idempotency-key",
+    "Cache-Control",
+    "Pragma",
   ],
-  exposedHeaders: ["Set-Cookie"],
+  exposedHeaders: ["Set-Cookie", "Idempotency-Key", "idempotency-key"],
   optionsSuccessStatus: 200,
 };
 
