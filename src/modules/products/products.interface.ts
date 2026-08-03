@@ -37,9 +37,14 @@ export interface ProductCreateInput {
   productImages?: string[];
   productVideos?: string[];
   isFeatured?: boolean;
+  specialSaleEnabled?: boolean;
+  discountEnabled?: boolean;
 }
 
-export type ProductUpdateInput = Partial<ProductCreateInput>;
+export type ProductUpdateInput = Partial<ProductCreateInput> & {
+  deletedProductImages?: string[];
+  deleteThumbnail?: boolean;
+};
 
 export interface LatestReviewView {
   id: string;
@@ -81,6 +86,8 @@ export interface ProductView {
   productVideos: string[];
   status: ProductStatus;
   isFeatured: boolean;
+  specialSaleEnabled: boolean;
+  discountEnabled: boolean;
   averageRating: number;
   reviewCount: number;
   ratingBreakdown: Record<1 | 2 | 3 | 4 | 5, number>;
