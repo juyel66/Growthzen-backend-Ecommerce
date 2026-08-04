@@ -27,9 +27,10 @@ export const getSalesReport = async (
   const skip = (page - 1) * limit;
   const search = options.search?.trim();
 
-  // Sales and Revenue MUST ONLY use DELIVERED status
+  // Sales and Revenue MUST ONLY use DELIVERED status with PAID payment
   const baseWhere: Prisma.OrderWhereInput = {
     status: "DELIVERED",
+    payment: { status: "PAID" },
     createdAt: {
       gte: startDate,
       lte: endDate,
@@ -58,6 +59,7 @@ export const getSalesReport = async (
     prismaClient.order.count({
       where: {
         status: "DELIVERED",
+        payment: { status: "PAID" },
         createdAt: { gte: startDate, lte: endDate },
       },
     }),
@@ -65,6 +67,7 @@ export const getSalesReport = async (
       _sum: { payableAmount: true },
       where: {
         status: "DELIVERED",
+        payment: { status: "PAID" },
         createdAt: { gte: startDate, lte: endDate },
       },
     }),
@@ -204,32 +207,33 @@ export const getRevenueReport = async (
   ] = await Promise.all([
     prismaClient.order.aggregate({
       _sum: { payableAmount: true },
-      where: { status: "DELIVERED", createdAt: { gte: startOfDay, lte: endOfDay } },
+      where: { status: "DELIVERED", payment: { status: "PAID" }, createdAt: { gte: startOfDay, lte: endOfDay } },
     }),
     prismaClient.order.aggregate({
       _sum: { payableAmount: true },
-      where: { status: "DELIVERED", createdAt: { gte: yesterdayStart, lte: yesterdayEnd } },
+      where: { status: "DELIVERED", payment: { status: "PAID" }, createdAt: { gte: yesterdayStart, lte: yesterdayEnd } },
     }),
     prismaClient.order.aggregate({
       _sum: { payableAmount: true },
-      where: { status: "DELIVERED", createdAt: { gte: weeklyStart, lte: endOfDay } },
+      where: { status: "DELIVERED", payment: { status: "PAID" }, createdAt: { gte: weeklyStart, lte: endOfDay } },
     }),
     prismaClient.order.aggregate({
       _sum: { payableAmount: true },
-      where: { status: "DELIVERED", createdAt: { gte: monthlyStart, lte: endOfDay } },
+      where: { status: "DELIVERED", payment: { status: "PAID" }, createdAt: { gte: monthlyStart, lte: endOfDay } },
     }),
     prismaClient.order.aggregate({
       _sum: { payableAmount: true },
-      where: { status: "DELIVERED", createdAt: { gte: yearlyStart, lte: endOfDay } },
+      where: { status: "DELIVERED", payment: { status: "PAID" }, createdAt: { gte: yearlyStart, lte: endOfDay } },
     }),
     prismaClient.order.aggregate({
       _sum: { payableAmount: true },
-      where: { status: "DELIVERED", createdAt: { gte: startDate, lte: endDate } },
+      where: { status: "DELIVERED", payment: { status: "PAID" }, createdAt: { gte: startDate, lte: endDate } },
     }),
   ]);
 
   const baseWhere: Prisma.OrderWhereInput = {
     status: "DELIVERED",
+    payment: { status: "PAID" },
     createdAt: { gte: startDate, lte: endDate },
   };
 
