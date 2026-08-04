@@ -278,6 +278,17 @@ model Order {
   orderCode             String               @unique
   userId                String?
   userEmail             String?
+  customerEmail         String?
+  paymentMethod         PaymentMethod        @default(COD)
+  guestName             String?
+  guestPhone            String?
+  guestEmail            String?
+  guestAddress          String?
+  guestDivision         String?
+  guestDistrict         String?
+  guestUpazila          String?
+  shippingType          String?
+  orderNotes            String?
   orderedByRole         Role                 @default(CUSTOMER)
   customerName          String
   customerPhone         String
@@ -289,6 +300,7 @@ model Order {
   payableAmount         Float
   couponCode            String?
   status                OrderStatus          @default(PENDING)
+  paymentCollected      Boolean              @default(true)
   confirmedAt           DateTime?
   cancelledAt           DateTime?
   deliveredAt           DateTime?
@@ -315,14 +327,20 @@ model Order {
   @@index([shippingMethodId])
   @@index([couponId])
   @@index([deliveryStatus])
+  @@index([guestPhone])
+  @@index([guestEmail])
+  @@index([customerPhone])
+  @@index([userEmail])
 }
 
 model OrderStatusHistory {
   id             String      @id @default(cuid())
   orderId        String
-  previousStatus OrderStatus
-  newStatus      OrderStatus
-  changedById    String?
+  previousStatus        OrderStatus
+  newStatus             OrderStatus
+  previousPaymentStatus PaymentStatus?
+  newPaymentStatus      PaymentStatus?
+  changedById           String?
   adminNote      String?
   createdAt      DateTime    @default(now())
   order          Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -417,6 +435,9 @@ enum PaymentMethod {
   COD
   BKASH
   NAGAD
+  SSLCOMMERZ
+  STRIPE
+  PAYPAL
 }
 
 enum PaymentStatus {
