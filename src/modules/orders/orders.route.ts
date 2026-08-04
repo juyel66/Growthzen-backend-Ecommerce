@@ -18,7 +18,8 @@ const router = Router();
  * @swagger
  * /orders:
  *   post:
- *     summary: Create an order
+ *     summary: Create an order (Supports both Authenticated and Guest Checkout)
+ *     description: Create an order. Authentication is OPTIONAL. Mobile phone number is REQUIRED. Email is optional.
  *     tags:
  *       - Orders
  *     security:
@@ -30,7 +31,7 @@ const router = Router();
  *           schema:
  *             type: object
  *             additionalProperties: false
- *             required: [products, customerName, customerPhone, deliveryArea, address]
+ *             required: [products, deliveryArea]
  *             properties:
  *               products:
  *                 type: array
@@ -43,24 +44,44 @@ const router = Router();
  *                     productId: { type: string, minLength: 1 }
  *                     quantity: { type: integer, minimum: 1 }
  *                     size: { type: string, nullable: true }
- *               customerName: { type: string, minLength: 1 }
- *               customerPhone: { type: string, minLength: 1 }
+ *               customerName: { type: string }
+ *               customerPhone: { type: string }
+ *               customerEmail: { type: string, nullable: true }
+ *               userEmail: { type: string, nullable: true }
+ *               paymentMethod: { type: string, enum: [COD, BKASH, NAGAD, SSLCOMMERZ, STRIPE, PAYPAL], default: COD }
+ *               guestName: { type: string, nullable: true }
+ *               guestPhone: { type: string, nullable: true }
+ *               guestEmail: { type: string, nullable: true }
+ *               guestAddress: { type: string, nullable: true }
+ *               guestDivision: { type: string, nullable: true }
+ *               guestDistrict: { type: string, nullable: true }
+ *               guestUpazila: { type: string, nullable: true }
+ *               shippingType: { type: string, nullable: true }
+ *               orderNotes: { type: string, nullable: true }
  *               deliveryArea: { type: string, enum: [INSIDE_DHAKA, OUTSIDE_DHAKA] }
- *               address: { type: string, minLength: 1 }
+ *               address: { type: string }
  *               couponCode: { type: string, nullable: true }
  *           example:
  *             products:
  *               - productId: "product-id-123"
  *                 quantity: 2
  *                 size: "XL"
- *             customerName: "Md Juyel Rana"
- *             customerPhone: "01700000000"
+ *             guestName: "Md Juyel Rana"
+ *             guestPhone: "01700000000"
+ *             guestEmail: "juyel@example.com"
+ *             guestAddress: "House 12, Road 5, Block B"
+ *             guestDivision: "Dhaka"
+ *             guestDistrict: "Dhaka"
+ *             guestUpazila: "Dhanmondi"
+ *             shippingType: "Standard Delivery"
+ *             orderNotes: "Please deliver before 5 PM"
  *             deliveryArea: "INSIDE_DHAKA"
- *             address: "Dhaka, Bangladesh"
  *             couponCode: "WINTER25"
  *     responses:
  *       201:
  *         description: Order created successfully
+ *       400:
+ *         description: Missing required phone number or invalid product input
  */
 router.post("/", optionalAuthenticate, validateRequest(createOrderValidationSchema), createOrderHandler);
 
@@ -78,6 +99,29 @@ router.post("/", optionalAuthenticate, validateRequest(createOrderValidationSche
  */
 router.get("/my-orders", authenticate, authorizeRoles("CUSTOMER", "RESELLER", "ADMIN", "SUPER_ADMIN"), getMyOrdersHandler);
 router.get("/", authenticate, authorizeRoles("ADMIN", "SUPER_ADMIN"), getOrdersHandler);
+
+/**
+ * @swagger
+ * /orders/track/{orderCode}:
+ *   get:
+ *     summary: Track order status
+ *     description: Retrieve tracking details for an order using Order Code / ID and optional Phone Number.
+ *     tags: [Orders]
+ *     parameters:
+ *       - in: path
+ *         name: orderCode
+ *         required: true
+ *         schema: { type: string }
+ *         description: Order Code or Order ID
+ *       - in: query
+ *         name: phone
+ *         required: false
+ *         schema: { type: string }
+ *         description: Customer phone number for verification
+ *     responses:
+ *       200: { description: Order tracking details retrieved successfully }
+ *       404: { description: Order not found or phone number does not match }
+ */
 router.get("/track/:orderCode", trackOrderHandler);
 /**
  * @swagger
