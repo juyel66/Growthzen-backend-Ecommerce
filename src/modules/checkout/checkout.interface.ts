@@ -5,6 +5,7 @@ export interface CheckoutUser { id: string; name: string; email: string; role: R
 export interface CheckoutInput {
   customerName: string;
   customerPhone: string;
+  customerEmail?: string | null;
   address: string;
   deliveryArea: DeliveryArea;
   paymentMethod: PaymentMethod;
