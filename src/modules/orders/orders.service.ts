@@ -1,4 +1,4 @@
-import type { DeliveryArea, OrderStatus, Prisma, Role } from "@prisma/client";
+import type { DeliveryArea, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Role } from "@prisma/client";
 import prismaClient from "../../config/prisma";
 import AppError from "../../utils/AppError";
 import { calculateFinalPrice } from "../pricing/pricing.service";
@@ -72,6 +72,17 @@ type OrderRecordWithItems = {
   orderCode: string;
   userId: string | null;
   userEmail: string | null;
+  customerEmail?: string | null;
+  paymentMethod?: PaymentMethod;
+  guestName?: string | null;
+  guestPhone?: string | null;
+  guestEmail?: string | null;
+  guestAddress?: string | null;
+  guestDivision?: string | null;
+  guestDistrict?: string | null;
+  guestUpazila?: string | null;
+  shippingType?: string | null;
+  orderNotes?: string | null;
   orderedByRole: Role;
   customerName: string;
   customerPhone: string;
@@ -83,6 +94,7 @@ type OrderRecordWithItems = {
   payableAmount: number;
   couponCode: string | null;
   status: OrderStatus;
+  paymentCollected?: boolean;
   createdAt: Date;
   updatedAt: Date;
   confirmedAt: Date | null;
@@ -92,7 +104,7 @@ type OrderRecordWithItems = {
   items: OrderItemRecord[];
   payment: {
     id: string;
-    method: "COD" | "BKASH" | "NAGAD";
+    method: PaymentMethod;
     status: "PENDING" | "PAID" | "FAILED" | "CANCELLED" | "REFUNDED";
     transactionId: string | null;
     paidAmount: number | null;
@@ -116,33 +128,51 @@ const mapOrderItem = (item: OrderItemRecord, orderStatus: OrderStatus): OrderVie
   reviewId: item.review?.id ?? null,
 });
 
-const mapOrder = (order: OrderRecordWithItems): OrderView => ({
-  id: order.id,
-  orderCode: order.orderCode,
-  userId: order.userId,
-  userEmail: order.userEmail,
-  email: order.userEmail,
-  orderedByRole: order.orderedByRole,
-  orderRole: order.orderedByRole,
-  customerName: order.customerName,
-  customerPhone: order.customerPhone,
-  address: order.address,
-  deliveryArea: order.deliveryArea,
-  subtotal: order.subtotal,
-  discountAmount: order.discountAmount,
-  deliveryCharge: order.deliveryCharge,
-  payableAmount: order.payableAmount,
-  couponCode: order.couponCode,
-  status: order.status,
-  items: order.items.map((item) => mapOrderItem(item, order.status)),
-  createdAt: order.createdAt,
-  updatedAt: order.updatedAt,
-  confirmedAt: order.confirmedAt,
-  cancelledAt: order.cancelledAt,
-  deliveredAt: order.deliveredAt,
-  adminNote: order.adminNote,
-  payment: order.payment,
-});
+const mapOrder = (order: OrderRecordWithItems): OrderView => {
+  const currentPaymentStatus: PaymentStatus = order.payment?.status ?? "PENDING";
+  const isPaid = currentPaymentStatus === "PAID";
+
+  return {
+    id: order.id,
+    orderCode: order.orderCode,
+    userId: order.userId,
+    userEmail: order.userEmail,
+    customerEmail: order.customerEmail ?? order.guestEmail ?? order.userEmail ?? null,
+    paymentMethod: order.paymentMethod ?? order.payment?.method ?? "COD",
+    paymentStatus: currentPaymentStatus,
+    paymentCollected: isPaid,
+    email: order.customerEmail ?? order.guestEmail ?? order.userEmail ?? null,
+    guestName: order.guestName ?? null,
+    guestPhone: order.guestPhone ?? null,
+    guestEmail: order.guestEmail ?? null,
+    guestAddress: order.guestAddress ?? null,
+    guestDivision: order.guestDivision ?? null,
+    guestDistrict: order.guestDistrict ?? null,
+    guestUpazila: order.guestUpazila ?? null,
+    shippingType: order.shippingType ?? null,
+    orderNotes: order.orderNotes ?? null,
+    orderedByRole: order.orderedByRole,
+    orderRole: order.orderedByRole,
+    customerName: order.customerName || order.guestName || "Customer",
+    customerPhone: order.customerPhone || order.guestPhone || "",
+    address: order.address || order.guestAddress || "",
+    deliveryArea: order.deliveryArea,
+    subtotal: order.subtotal,
+    discountAmount: order.discountAmount,
+    deliveryCharge: order.deliveryCharge,
+    payableAmount: order.payableAmount,
+    couponCode: order.couponCode,
+    status: order.status,
+    items: order.items.map((item) => mapOrderItem(item, order.status)),
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+    confirmedAt: order.confirmedAt,
+    cancelledAt: order.cancelledAt,
+    deliveredAt: order.deliveredAt,
+    adminNote: order.adminNote,
+    payment: order.payment,
+  };
+};
 
 const getAppliedDeliveryCharge = async (deliveryArea: DeliveryArea): Promise<number> => {
   const settings = await prismaClient.appSetting.findFirst({
@@ -197,7 +227,11 @@ const buildOrderSearchFilter = (search?: string): Prisma.OrderWhereInput => {
       { orderCode: { contains: normalizedSearch, mode: "insensitive" } },
       { customerName: { contains: normalizedSearch, mode: "insensitive" } },
       { customerPhone: { contains: normalizedSearch, mode: "insensitive" } },
+      { customerEmail: { contains: normalizedSearch, mode: "insensitive" } },
       { userEmail: { contains: normalizedSearch, mode: "insensitive" } },
+      { guestName: { contains: normalizedSearch, mode: "insensitive" } },
+      { guestPhone: { contains: normalizedSearch, mode: "insensitive" } },
+      { guestEmail: { contains: normalizedSearch, mode: "insensitive" } },
       { address: { contains: normalizedSearch, mode: "insensitive" } },
       { couponCode: { contains: normalizedSearch, mode: "insensitive" } },
     ],
@@ -303,9 +337,9 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
 
     const sizeAttribute = Array.isArray(product.attributes)
       ? product.attributes.find((attribute) => {
-          return Boolean(attribute && typeof attribute === "object" && !Array.isArray(attribute)
-            && typeof attribute.name === "string" && attribute.name.toLowerCase() === "size");
-        })
+        return Boolean(attribute && typeof attribute === "object" && !Array.isArray(attribute)
+          && typeof attribute.name === "string" && attribute.name.toLowerCase() === "size");
+      })
       : undefined;
     const sizes = sizeAttribute && typeof sizeAttribute === "object" && !Array.isArray(sizeAttribute)
       && Array.isArray(sizeAttribute.values)
@@ -339,34 +373,86 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
   const deliveryCharge = roundToTwo(await getAppliedDeliveryCharge(payload.deliveryArea));
   const payableAmount = roundToTwo(Math.max(0, subtotal - discountAmount + deliveryCharge));
 
+  const isGuest = !currentUser;
+  const guestName = payload.guestName || payload.customerName || null;
+  const guestPhone = payload.guestPhone || payload.customerPhone || null;
+  const guestEmail = payload.guestEmail || payload.customerEmail || payload.userEmail || null;
+  const guestAddress = payload.guestAddress || payload.address || null;
+  const guestDivision = payload.guestDivision || null;
+  const guestDistrict = payload.guestDistrict || null;
+  const guestUpazila = payload.guestUpazila || null;
+  const shippingType = payload.shippingType || null;
+  const orderNotes = payload.orderNotes || null;
+
+  const customerName = payload.customerName || guestName || "Customer";
+  const customerPhone = payload.customerPhone || guestPhone || "";
+  const customerEmail = payload.customerEmail || payload.userEmail || payload.guestEmail || (currentUser?.email ?? null);
+  const finalAddress = payload.address || [guestAddress, guestUpazila, guestDistrict, guestDivision].filter(Boolean).join(", ");
+  const userEmail = isGuest ? customerEmail : (currentUser.email || customerEmail || null);
+
+  const rawPaymentMethod = (payload.paymentMethod || "COD").toUpperCase();
+  const validPaymentMethods = ["COD", "BKASH", "NAGAD", "SSLCOMMERZ", "STRIPE", "PAYPAL"] as const;
+  const selectedPaymentMethod = (validPaymentMethods.includes(rawPaymentMethod as any) ? rawPaymentMethod : "COD") as PaymentMethod;
+
   let retries = 5;
   let createdOrder: OrderCreateRecord | null = null;
 
   while (retries > 0) {
     const orderCode = await generateOrderCode();
     try {
-      createdOrder = await prismaClient.order.create({
-        data: {
-          orderCode,
-          userId: currentUser?.id ?? null,
-          userEmail: currentUser?.email ?? null,
-          orderedByRole: orderRole,
-          customerName: payload.customerName,
-          customerPhone: payload.customerPhone,
-          address: payload.address,
-          deliveryArea: payload.deliveryArea,
-          subtotal,
-          discountAmount,
-          deliveryCharge,
-          payableAmount,
-          couponCode: couponIsApplied ? normalizedCouponCode : null,
-          status: "PENDING",
-          items: {
-            create: orderItems,
+      createdOrder = await prismaClient.$transaction(async (tx) => {
+        const newOrder = await tx.order.create({
+          data: {
+            orderCode,
+            userId: isGuest ? null : currentUser.id,
+            userEmail,
+            customerEmail,
+            paymentMethod: selectedPaymentMethod,
+            guestName: isGuest ? guestName : (payload.guestName || null),
+            guestPhone: isGuest ? guestPhone : (payload.guestPhone || null),
+            guestEmail: isGuest ? guestEmail : (payload.guestEmail || null),
+            guestAddress: isGuest ? guestAddress : (payload.guestAddress || null),
+            guestDivision,
+            guestDistrict,
+            guestUpazila,
+            shippingType,
+            orderNotes,
+            orderedByRole: orderRole,
+            customerName,
+            customerPhone,
+            address: finalAddress,
+            deliveryArea: payload.deliveryArea,
+            subtotal,
+            discountAmount,
+            deliveryCharge,
+            payableAmount,
+            couponCode: couponIsApplied ? normalizedCouponCode : null,
+            status: "PENDING",
+            paymentCollected: payload.paymentCollected ?? true,
+            items: {
+              create: orderItems,
+            },
+            payment: { create: { method: selectedPaymentMethod, status: "PENDING" } },
           },
-          payment: { create: { method: "COD", status: "PENDING" } },
-        },
-        include: orderCreateInclude,
+          include: orderCreateInclude,
+        });
+
+        // Clear customer cart atomically upon successful order creation
+        if (!isGuest && currentUser?.id) {
+          await tx.cartItem.deleteMany({
+            where: {
+              cart: {
+                userId: currentUser.id,
+              },
+            },
+          });
+          await tx.cart.updateMany({
+            where: { userId: currentUser.id },
+            data: { appliedCouponId: null },
+          });
+        }
+
+        return newOrder;
       });
       break;
     } catch (error: unknown) {
@@ -390,20 +476,30 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
   // Trigger emails asynchronously (background) so we do not block order confirmation response
   Promise.resolve().then(async () => {
     try {
-      // 1. Admin Email Notification
+      const customerEmailToUse = createdOrder!.userEmail || createdOrder!.guestEmail;
+
+      // 1. Admin Email Notification (Requirement 8)
       const adminHtml = getAdminOrderCreatedEmail({
         orderCode: createdOrder!.orderCode,
+        orderDate: createdOrder!.createdAt,
         customerName: createdOrder!.customerName,
         customerPhone: createdOrder!.customerPhone,
-        customerEmail: createdOrder!.userEmail,
-        customerRole: createdOrder!.orderedByRole,
+        customerEmail: customerEmailToUse,
+        customerRole: createdOrder!.userId ? createdOrder!.orderedByRole : "GUEST",
         deliveryArea: createdOrder!.deliveryArea,
         address: createdOrder!.address,
+        division: createdOrder!.guestDivision,
+        district: createdOrder!.guestDistrict,
+        upazila: createdOrder!.guestUpazila,
+        shippingType: createdOrder!.shippingType,
+        orderNotes: createdOrder!.orderNotes,
+        paymentMethod: "COD (Cash On Delivery)",
         items: createdOrder!.items,
         subtotal: createdOrder!.subtotal,
         discountAmount: createdOrder!.discountAmount,
         deliveryCharge: createdOrder!.deliveryCharge,
         payableAmount: createdOrder!.payableAmount,
+        couponCode: createdOrder!.couponCode,
         status: createdOrder!.status,
       });
 
@@ -418,20 +514,34 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
         html: adminHtml,
       })));
 
-      // 2. Customer Order Received Email (only if authenticated and email exists)
-      if (createdOrder!.userId && createdOrder!.userEmail) {
+      // 2. Customer Order Confirmation Email (Requirement 7 - sent if email provided)
+      if (customerEmailToUse) {
         const customerHtml = getCustomerOrderReceivedEmail({
           orderCode: createdOrder!.orderCode,
+          orderDate: createdOrder!.createdAt,
+          customerName: createdOrder!.customerName,
+          customerPhone: createdOrder!.customerPhone,
+          customerEmail: customerEmailToUse,
+          deliveryArea: createdOrder!.deliveryArea,
+          address: createdOrder!.address,
+          division: createdOrder!.guestDivision,
+          district: createdOrder!.guestDistrict,
+          upazila: createdOrder!.guestUpazila,
+          shippingType: createdOrder!.shippingType,
+          orderNotes: createdOrder!.orderNotes,
+          paymentMethod: "COD (Cash On Delivery)",
           items: createdOrder!.items,
           subtotal: createdOrder!.subtotal,
+          discountAmount: createdOrder!.discountAmount,
           deliveryCharge: createdOrder!.deliveryCharge,
+          couponCode: createdOrder!.couponCode,
           payableAmount: createdOrder!.payableAmount,
         });
 
         await sendEmail({
-          to: createdOrder!.userEmail,
-          subject: `Order Received Successfully - ${createdOrder!.orderCode}`,
-          text: `Your order ${createdOrder!.orderCode} has been received successfully.`,
+          to: customerEmailToUse,
+          subject: `Order Confirmation - ${createdOrder!.orderCode} | GrowthZen Trends`,
+          text: `Thank you for your order ${createdOrder!.orderCode}.`,
           html: customerHtml,
         });
       }
@@ -518,34 +628,90 @@ export const updateOrderStatus = async (
     throw new AppError(404, "Order not found");
   }
 
-  const statusChanged = existingOrder.status !== payload.status;
+  const requestedOrderStatus = payload.orderStatus ?? payload.status;
+  const rawPaymentStatus = payload.paymentStatus;
 
-  const updateData: Prisma.OrderUpdateInput = {
-    status: payload.status,
-    adminNote: payload.adminNote !== undefined ? payload.adminNote : undefined,
-  };
-
-  if (statusChanged) {
-    if (payload.status === "CONFIRMED") {
-      updateData.confirmedAt = new Date();
-    } else if (payload.status === "CANCELLED") {
-      updateData.cancelledAt = new Date();
-    } else if (payload.status === "DELIVERED") {
-      updateData.deliveredAt = new Date();
+  let mappedPaymentStatus: PaymentStatus | undefined = undefined;
+  if (rawPaymentStatus) {
+    if (rawPaymentStatus === "PAID") {
+      mappedPaymentStatus = "PAID";
+    } else if (rawPaymentStatus === "UNPAID") {
+      mappedPaymentStatus = "PENDING";
+    } else {
+      mappedPaymentStatus = rawPaymentStatus as PaymentStatus;
     }
   }
 
+  const targetOrderStatus = requestedOrderStatus ?? existingOrder.status;
+  const statusChanged = requestedOrderStatus !== undefined && existingOrder.status !== requestedOrderStatus;
+
   const updatedOrder = await prismaClient.$transaction(async (tx) => {
-    if (statusChanged) {
+    const previousOrderStatus = existingOrder.status;
+    const previousPaymentStatus = existingOrder.payment?.status ?? "PENDING";
+    const newOrderStatus = targetOrderStatus;
+
+    let newPaymentStatus: PaymentStatus = previousPaymentStatus;
+
+    if (mappedPaymentStatus) {
+      newPaymentStatus = mappedPaymentStatus;
+      const existingPayment = existingOrder.payment ?? await tx.payment.findUnique({ where: { orderId: existingOrder.id } });
+      if (existingPayment) {
+        await tx.payment.update({
+          where: { id: existingPayment.id },
+          data: {
+            status: mappedPaymentStatus,
+            ...(mappedPaymentStatus === "PAID" ? { verifiedAt: new Date(), verifiedById: currentUser?.id ?? null } : {}),
+          },
+        });
+      } else {
+        await tx.payment.create({
+          data: {
+            orderId: existingOrder.id,
+            method: existingOrder.paymentMethod,
+            status: mappedPaymentStatus,
+            ...(mappedPaymentStatus === "PAID" ? { verifiedAt: new Date(), verifiedById: currentUser?.id ?? null } : {}),
+          },
+        });
+      }
+    }
+
+    const orderStatusChanged = previousOrderStatus !== newOrderStatus;
+    const paymentStatusChanged = previousPaymentStatus !== newPaymentStatus;
+
+    if (orderStatusChanged || paymentStatusChanged || payload.adminNote !== undefined) {
       await tx.orderStatusHistory.create({
         data: {
           orderId: existingOrder.id,
-          previousStatus: existingOrder.status,
-          newStatus: payload.status,
+          previousStatus: previousOrderStatus,
+          newStatus: newOrderStatus,
+          previousPaymentStatus,
+          newPaymentStatus,
           changedById: currentUser?.id ?? null,
           adminNote: payload.adminNote ?? null,
         },
       });
+    }
+
+    const updateData: Prisma.OrderUpdateInput = {};
+    if (requestedOrderStatus !== undefined) {
+      updateData.status = requestedOrderStatus;
+      if (requestedOrderStatus === "CONFIRMED" && previousOrderStatus !== "CONFIRMED") {
+        updateData.confirmedAt = new Date();
+      } else if (requestedOrderStatus === "CANCELLED" && previousOrderStatus !== "CANCELLED") {
+        updateData.cancelledAt = new Date();
+      } else if (requestedOrderStatus === "DELIVERED" && previousOrderStatus !== "DELIVERED") {
+        updateData.deliveredAt = new Date();
+      }
+    }
+
+    if (mappedPaymentStatus) {
+      updateData.paymentCollected = mappedPaymentStatus === "PAID";
+    } else if (payload.paymentCollected !== undefined) {
+      updateData.paymentCollected = payload.paymentCollected;
+    }
+
+    if (payload.adminNote !== undefined) {
+      updateData.adminNote = payload.adminNote;
     }
 
     return tx.order.update({
@@ -602,24 +768,39 @@ export interface OrderTrackingView {
   cancelledAt: Date | null;
 }
 
-export const trackOrder = async (orderCode: string): Promise<OrderTrackingView> => {
-  const order = await prismaClient.order.findUnique({
-    where: { orderCode },
-    select: {
-      orderCode: true,
-      status: true,
-      createdAt: true,
-      confirmedAt: true,
-      deliveredAt: true,
-      cancelledAt: true,
+export const trackOrder = async (orderCode: string, phone?: string): Promise<OrderView | OrderTrackingView> => {
+  const order = await prismaClient.order.findFirst({
+    where: {
+      OR: [
+        { orderCode },
+        { id: orderCode },
+      ],
     },
+    include: orderInclude,
   });
 
   if (!order) {
     throw new AppError(404, "Order not found");
   }
 
-  return order;
+  if (phone && phone.trim()) {
+    const normalizedPhone = phone.trim();
+    const matchesPhone = (order.customerPhone && order.customerPhone.trim() === normalizedPhone) ||
+      (order.guestPhone && order.guestPhone.trim() === normalizedPhone);
+    if (!matchesPhone) {
+      throw new AppError(404, "Order not found or phone number does not match");
+    }
+    return mapOrder(order);
+  }
+
+  return {
+    orderCode: order.orderCode,
+    status: order.status,
+    createdAt: order.createdAt,
+    confirmedAt: order.confirmedAt,
+    deliveredAt: order.deliveredAt,
+    cancelledAt: order.cancelledAt,
+  };
 };
 
 export const cancelMyOrder = async (orderId: string, currentUser: CreateOrderRequestUser): Promise<OrderView> => {
