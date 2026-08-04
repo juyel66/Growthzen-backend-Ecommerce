@@ -138,12 +138,13 @@ export const updateOrderStatusHandler = catchAsync(async (req: Request, res: Res
 
 export const trackOrderHandler = catchAsync(async (req: Request, res: Response) => {
   const orderCode = getParamId(req.params.orderCode);
+  const queryPhone = getQueryValue(req.query.phone) || getQueryValue(req.query.customerPhone);
 
   if (!orderCode) {
     throw new AppError(400, "Order code is required");
   }
 
-  const order = await trackOrder(orderCode);
+  const order = await trackOrder(orderCode, queryPhone);
 
   sendResponse(res, {
     message: "Order tracking details retrieved successfully",
