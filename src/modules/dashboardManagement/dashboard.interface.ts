@@ -102,6 +102,9 @@ export interface DashboardPaymentAnalytics {
   failedPayments: number;
   cancelledPayments: number;
   refundedPayments: number;
+  totalRefundAmount?: number;
+  refundedAmount?: number;
+  totalPaidAmount?: number;
   paymentsByStatus: DashboardPaymentStatusStat[];
   paymentsByMethod: DashboardPaymentMethodStat[];
 }
