@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import AppError from "../../utils/AppError";
 import catchAsync from "../../utils/catchAsync";
 import sendResponse from "../../utils/sendResponse";
-import { approvePayment, getPayment, listPayments, refundPayment, rejectPayment, submitManualPayment } from "./payments.service";
+import { approvePayment, getPayment, getUnpaidDeliveredOrders, listPayments, markOrderPaymentPaid, refundPayment, rejectPayment, submitManualPayment } from "./payments.service";
 import { paymentListQueryValidationSchema } from "./payments.validation";
 
 const getUser = (req: Request) => {
@@ -43,3 +43,17 @@ export const listPaymentsHandler = catchAsync(async (req: Request, res: Response
 export const refundPaymentHandler = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, { message: "Payment refunded successfully", data: await refundPayment(getUser(req), getPaymentId(req), req.body) });
 });
+
+export const getUnpaidDeliveredOrdersHandler = catchAsync(async (_req: Request, res: Response) => {
+  const orders = await getUnpaidDeliveredOrders();
+  sendResponse(res, { message: "Unpaid delivered orders retrieved successfully", data: orders });
+});
+
+export const markOrderPaymentPaidHandler = catchAsync(async (req: Request, res: Response) => {
+  const value = req.params.orderId;
+  const orderId = Array.isArray(value) ? value[0] : value;
+  if (!orderId) throw new AppError(400, "Order id is required");
+  const result = await markOrderPaymentPaid(getUser(req), orderId);
+  sendResponse(res, { message: "Payment marked as paid successfully", data: result });
+});
+
