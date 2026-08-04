@@ -8,10 +8,23 @@ export interface OrderProductInput {
 
 export interface CreateOrderInput {
   products: OrderProductInput[];
-  customerName: string;
-  customerPhone: string;
+  customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string | null;
+  userEmail?: string | null;
+  paymentMethod?: PaymentMethod | string | null;
+  paymentCollected?: boolean;
+  guestName?: string | null;
+  guestPhone?: string | null;
+  guestEmail?: string | null;
+  guestAddress?: string | null;
+  guestDivision?: string | null;
+  guestDistrict?: string | null;
+  guestUpazila?: string | null;
+  shippingType?: string | null;
+  orderNotes?: string | null;
   deliveryArea: DeliveryArea;
-  address: string;
+  address?: string;
   couponCode?: string | null;
 }
 
@@ -22,7 +35,10 @@ export interface CreateOrderRequestUser {
 }
 
 export interface UpdateOrderStatusInput {
-  status: Exclude<OrderStatus, "PENDING">;
+  orderStatus?: OrderStatus;
+  status?: OrderStatus;
+  paymentStatus?: "PAID" | "UNPAID" | PaymentStatus;
+  paymentCollected?: boolean;
   adminNote?: string | null;
 }
 
@@ -44,7 +60,20 @@ export interface OrderView {
   orderCode: string;
   userId: string | null;
   userEmail: string | null;
+  customerEmail: string | null;
+  paymentMethod: PaymentMethod | string;
+  paymentStatus: PaymentStatus;
+  paymentCollected: boolean;
   email: string | null;
+  guestName: string | null;
+  guestPhone: string | null;
+  guestEmail: string | null;
+  guestAddress: string | null;
+  guestDivision: string | null;
+  guestDistrict: string | null;
+  guestUpazila: string | null;
+  shippingType: string | null;
+  orderNotes: string | null;
   orderedByRole: Role;
   orderRole: Role;
   customerName: string;
