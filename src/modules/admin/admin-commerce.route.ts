@@ -3,7 +3,7 @@ import { authenticate, authorizeRoles } from "../../middlewares/auth";
 import validateRequest from "../../middlewares/validateRequest";
 import { getOrderByIdHandler, getOrdersHandler, updateOrderStatusHandler } from "../orders/orders.controller";
 import { orderStatusUpdateValidationSchema } from "../orders/orders.validation";
-import { approvePaymentHandler, listPaymentsHandler, refundPaymentHandler, rejectPaymentHandler } from "../payments/payments.controller";
+import { approvePaymentHandler, getUnpaidDeliveredOrdersHandler, listPaymentsHandler, markOrderPaymentPaidHandler, refundPaymentHandler, rejectPaymentHandler } from "../payments/payments.controller";
 import { refundPaymentValidationSchema, rejectPaymentValidationSchema } from "../payments/payments.validation";
 
 const router = Router();
@@ -161,4 +161,38 @@ router.patch("/payments/:paymentId/reject", validateRequest(rejectPaymentValidat
  */
 router.patch("/payments/:paymentId/refund", validateRequest(refundPaymentValidationSchema), refundPaymentHandler);
 
+/**
+ * @swagger
+ * /admin/payments/unpaid-delivered:
+ *   get:
+ *     summary: List unpaid delivered orders
+ *     description: Returns orders that are delivered but payment has not been collected yet.
+ *     tags: [Admin Payments]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Unpaid delivered orders retrieved successfully
+ */
+router.get("/payments/unpaid-delivered", getUnpaidDeliveredOrdersHandler);
+
+/**
+ * @swagger
+ * /admin/payments/{orderId}/mark-paid:
+ *   patch:
+ *     summary: Mark payment as paid for an order
+ *     description: Sets paymentCollected to true and payment status to PAID inside a transaction.
+ *     tags: [Admin Payments]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Payment marked as paid successfully
+ */
+router.patch("/payments/:orderId/mark-paid", markOrderPaymentPaidHandler);
+
 export default router;
+
