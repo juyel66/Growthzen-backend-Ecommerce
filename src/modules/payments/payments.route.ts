@@ -1,11 +1,14 @@
 import { Router } from "express";
-import { authenticate } from "../../middlewares/auth";
+import { authenticate, authorizeRoles } from "../../middlewares/auth";
 import validateRequest from "../../middlewares/validateRequest";
-import { getPaymentHandler, submitManualPaymentHandler } from "./payments.controller";
+import { getPaymentHandler, getUnpaidDeliveredOrdersHandler, markOrderPaymentPaidHandler, submitManualPaymentHandler } from "./payments.controller";
 import { manualPaymentValidationSchema } from "./payments.validation";
 
 const router = Router();
 router.use(authenticate);
+
+router.get("/unpaid-delivered", authorizeRoles("ADMIN", "SUPER_ADMIN"), getUnpaidDeliveredOrdersHandler);
+router.patch("/:orderId/mark-paid", authorizeRoles("ADMIN", "SUPER_ADMIN"), markOrderPaymentPaidHandler);
 
 /**
  * @swagger
