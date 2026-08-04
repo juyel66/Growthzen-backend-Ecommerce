@@ -23,6 +23,7 @@ export interface PaymentView {
   orderNumber: string;
   method: PaymentMethod;
   status: PaymentStatus;
+  paymentCollected: boolean;
   senderNumber: string | null;
   transactionId: string | null;
   paidAmount: number | null;
@@ -38,3 +39,31 @@ export interface PaymentListView {
   items: PaymentView[];
   meta: { page: number; limit: number; total: number; totalPages: number };
 }
+
+export interface UnpaidDeliveredOrderView {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  orderCode: string;
+  customer: string;
+  customerName: string;
+  phone: string;
+  customerPhone: string;
+  email: string | null;
+  customerEmail: string | null;
+  shippingArea: string;
+  deliveryArea: string;
+  fullAddress: string;
+  address: string;
+  amount: number;
+  grandTotal: number;
+  payableAmount: number;
+  paymentMethod: PaymentMethod | string;
+  paymentStatus: PaymentStatus;
+  paymentCollected: boolean;
+  deliveryDate: Date | null;
+  deliveredAt: Date | null;
+  createdDate: Date;
+  createdAt: Date;
+}
+
