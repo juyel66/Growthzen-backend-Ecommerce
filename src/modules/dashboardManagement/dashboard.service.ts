@@ -174,6 +174,7 @@ const buildBuckets = (range: DashboardRangeWindow): Array<{ key: string; label: 
 
 const buildDeliveredRevenueWhere = (from?: Date, to?: Date): Prisma.OrderWhereInput => ({
   status: "DELIVERED",
+  payment: { status: "PAID" },
   ...(from && to ? { createdAt: { gte: from, lte: to } } : {}),
 });
 
@@ -321,14 +322,43 @@ const mapCustomerSummary = async (): Promise<DashboardCustomerAnalytics> => {
 
 const mapPaymentSummary = async (): Promise<DashboardPaymentAnalytics> => {
   const range = resolveRangeWindow({ range: "YEARLY" });
-  const [totalPayments, statusGroups, methodGroups] = await Promise.all([
+  const [
+    totalPayments,
+    statusGroups,
+    methodGroups,
+    refundedPaymentsRecords,
+    paidPaymentsRecords,
+  ] = await Promise.all([
     prismaClient.payment.count(),
     prismaClient.payment.groupBy({ by: ["status"], _count: { _all: true } }),
     prismaClient.payment.groupBy({ by: ["method"], _count: { _all: true } }),
+    prismaClient.payment.findMany({
+      where: { status: "REFUNDED" },
+      select: { paidAmount: true, order: { select: { payableAmount: true } } },
+    }),
+    prismaClient.payment.findMany({
+      where: { status: "PAID" },
+      select: { paidAmount: true, order: { select: { payableAmount: true } } },
+    }),
   ]);
 
   const statusMap = new Map(statusGroups.map((item) => [item.status, item._count._all]));
   const methodMap = new Map(methodGroups.map((item) => [item.method, item._count._all]));
+
+  const refundedPayments = statusMap.get("REFUNDED") ?? 0;
+  const totalRefundAmount = roundToTwo(
+    refundedPaymentsRecords.reduce(
+      (sum, p) => sum + (p.paidAmount ?? p.order?.payableAmount ?? 0),
+      0
+    )
+  );
+
+  const totalPaidAmount = roundToTwo(
+    paidPaymentsRecords.reduce(
+      (sum, p) => sum + (p.paidAmount ?? p.order?.payableAmount ?? 0),
+      0
+    )
+  );
 
   return {
     range,
@@ -337,7 +367,10 @@ const mapPaymentSummary = async (): Promise<DashboardPaymentAnalytics> => {
     paidPayments: statusMap.get("PAID") ?? 0,
     failedPayments: statusMap.get("FAILED") ?? 0,
     cancelledPayments: statusMap.get("CANCELLED") ?? 0,
-    refundedPayments: statusMap.get("REFUNDED") ?? 0,
+    refundedPayments,
+    totalRefundAmount,
+    refundedAmount: totalRefundAmount,
+    totalPaidAmount,
     paymentsByStatus: paymentStatuses.map((status) => ({ status, totalPayments: statusMap.get(status) ?? 0 })),
     paymentsByMethod: paymentMethods.map((method) => ({ method, totalPayments: methodMap.get(method) ?? 0 })),
   };
