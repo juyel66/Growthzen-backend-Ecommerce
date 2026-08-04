@@ -240,6 +240,8 @@ export const checkout = async (user: CheckoutUser, payload: CheckoutInput, key: 
               idempotencyKey: scoped,
               userId: user.id,
               userEmail: user.email,
+              customerEmail: payload.customerEmail || user.email || null,
+              paymentMethod: payload.paymentMethod || "COD",
               orderedByRole: user.role,
               customerName: payload.customerName,
               customerPhone: payload.customerPhone,
