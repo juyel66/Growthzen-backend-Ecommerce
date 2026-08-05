@@ -26,6 +26,7 @@ export interface CreateOrderInput {
   deliveryArea: DeliveryArea;
   address?: string;
   couponCode?: string | null;
+  shippingMethodId?: string | null;
 }
 
 export interface CreateOrderRequestUser {
@@ -84,7 +85,18 @@ export interface OrderView {
   discountAmount: number;
   deliveryCharge: number;
   payableAmount: number;
+  originalSubtotal: number;
+  productDiscount: number;
+  categoryDiscount: number;
+  specialDiscount: number;
+  couponDiscount: number;
+  shippingCharge: number;
+  taxAmount: number;
+  grandTotal: number;
+  totalSavings: number;
+  finalPayable: number;
   couponCode: string | null;
+  couponId: string | null;
   status: OrderStatus;
   items: OrderItemView[];
   createdAt: Date;
