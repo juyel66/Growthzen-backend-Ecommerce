@@ -160,12 +160,12 @@ model CouponProduct {
 model CouponUsage {
   id             String   @id @default(cuid())
   couponId       String
-  userId         String
+  userId         String?
   orderId        String   @unique
   discountAmount Float
   createdAt      DateTime @default(now())
   coupon         Coupon   @relation(fields: [couponId], references: [id], onDelete: Restrict)
-  user           User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  user           User?    @relation(fields: [userId], references: [id], onDelete: Restrict)
   order          Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
 
   @@index([couponId, userId])
@@ -298,6 +298,16 @@ model Order {
   discountAmount        Float
   deliveryCharge        Float
   payableAmount         Float
+  originalSubtotal      Float                @default(0)
+  productDiscount       Float                @default(0)
+  categoryDiscount      Float                @default(0)
+  specialDiscount       Float                @default(0)
+  couponDiscount        Float                @default(0)
+  shippingCharge        Float                @default(0)
+  taxAmount             Float                @default(0)
+  grandTotal            Float                @default(0)
+  totalSavings          Float                @default(0)
+  finalPayable          Float                @default(0)
   couponCode            String?
   status                OrderStatus          @default(PENDING)
   paymentCollected      Boolean              @default(true)
