@@ -46,29 +46,119 @@ export const deleteCoupon = async (id: string) => { await getCoupon(id); return 
 
 const couponCartSelect = { id: true, items: { select: { quantity: true, product: { select: { ...commerceProductSelect, category: true } } } } } satisfies Prisma.CartSelect;
 export type CouponCart = Prisma.CartGetPayload<{ select: typeof couponCartSelect }>;
-export const evaluateCoupon = async (coupon: CouponRecord, userId: string, cart: CouponCart, role: Role, database: Prisma.TransactionClient | typeof prismaClient = prismaClient) => {
+
+export interface EvaluationItem {
+  product: {
+    id: string;
+    category?: string | null;
+    categoryRel?: Record<string, any> | null;
+    [key: string]: any;
+  };
+  quantity: number;
+  unitPrice: number;
+}
+
+export const findCouponByCode = async (
+  code: string,
+  database: Prisma.TransactionClient | typeof prismaClient = prismaClient
+): Promise<CouponRecord | null> => {
+  const normalized = normalizeCode(code);
+  return database.coupon.findFirst({
+    where: { code: normalized, deletedAt: null },
+    include: couponInclude,
+  });
+};
+
+export const evaluateCouponForItems = async (
+  coupon: CouponRecord,
+  userId: string | null | undefined,
+  items: EvaluationItem[],
+  subtotalAmount: number,
+  database: Prisma.TransactionClient | typeof prismaClient = prismaClient
+) => {
   const now = new Date();
   if (coupon.deletedAt || !coupon.isActive) throw new AppError(400, "Coupon is inactive");
   if (now < coupon.startsAt) throw new AppError(400, "Coupon is not active yet");
   if (now > coupon.expiresAt) throw new AppError(400, "Coupon has expired");
   if (coupon.maximumUsage !== null && coupon._count.usages >= coupon.maximumUsage) throw new AppError(400, "Coupon usage limit has been exceeded");
-  if (coupon.perUserUsageLimit !== null) { const count = await database.couponUsage.count({ where: { couponId: coupon.id, userId } }); if (count >= coupon.perUserUsageLimit) throw new AppError(400, "Your coupon usage limit has been exceeded"); }
-  const lines = cart.items.map((item) => ({ item, total: calculateProductPrice(item.product, role).sellingPrice * item.quantity }));
-  const originalTotal = Number(lines.reduce((sum, line) => sum + line.total, 0).toFixed(2));
-  if (coupon.minimumOrderAmount !== null && originalTotal < coupon.minimumOrderAmount) throw new AppError(400, `Minimum order amount is ${coupon.minimumOrderAmount}`);
-  const productIds = new Set(coupon.products.map((item) => item.productId)); const categories = new Set(coupon.categories.map((item) => item.toLowerCase()));
-  const eligible = lines.filter(({ item }) => coupon.scope === "ENTIRE_ORDER" || (coupon.scope === "SPECIFIC_PRODUCT" && productIds.has(item.product.id)) || (coupon.scope === "SPECIFIC_CATEGORY" && categories.has((item.product.category ?? "").toLowerCase())));
+  if (userId && coupon.perUserUsageLimit !== null) {
+    const count = await database.couponUsage.count({ where: { couponId: coupon.id, userId } });
+    if (count >= coupon.perUserUsageLimit) throw new AppError(400, "Your coupon usage limit has been exceeded");
+  }
+
+  const lines = items.map((item) => ({
+    item,
+    total: item.unitPrice * item.quantity,
+  }));
+  const originalTotal = subtotalAmount;
+
+  if (coupon.minimumOrderAmount !== null && originalTotal < coupon.minimumOrderAmount) {
+    throw new AppError(400, `Minimum order amount is ${coupon.minimumOrderAmount}`);
+  }
+
+  const productIds = new Set(coupon.products.map((p) => p.productId));
+  const categories = new Set(coupon.categories.map((c) => c.toLowerCase()));
+
+  const eligible = lines.filter(({ item }) => {
+    if (coupon.scope === "ENTIRE_ORDER") return true;
+    if (coupon.scope === "SPECIFIC_PRODUCT" && productIds.has(item.product.id)) return true;
+    if (coupon.scope === "SPECIFIC_CATEGORY") {
+      const catName = item.product.categoryRel?.name ?? item.product.category ?? "";
+      return categories.has(catName.toLowerCase());
+    }
+    return false;
+  });
+
   if (!eligible.length) throw new AppError(400, "Coupon is not applicable to selected products");
+
   const eligibleTotal = eligible.reduce((sum, line) => sum + line.total, 0);
-  let discount = coupon.discountType === "PERCENTAGE" ? eligibleTotal * coupon.discountValue / 100 : coupon.discountValue;
+  let discount = coupon.discountType === "PERCENTAGE" ? (eligibleTotal * coupon.discountValue) / 100 : coupon.discountValue;
   if (coupon.maximumDiscount !== null) discount = Math.min(discount, coupon.maximumDiscount);
   discount = Number(Math.min(discount, originalTotal, eligibleTotal).toFixed(2));
-  return { couponId: coupon.id, couponCode: coupon.code, originalTotal, discountAmount: discount, finalTotal: Number((originalTotal - discount).toFixed(2)) };
+
+  return {
+    couponId: coupon.id,
+    couponCode: coupon.code,
+    originalTotal,
+    discountAmount: discount,
+    finalTotal: Number((originalTotal - discount).toFixed(2)),
+  };
 };
+
+export const evaluateCoupon = async (
+  coupon: CouponRecord,
+  userId: string,
+  cart: CouponCart,
+  role: Role,
+  database: Prisma.TransactionClient | typeof prismaClient = prismaClient
+) => {
+  const items: EvaluationItem[] = cart.items.map((item) => ({
+    product: item.product,
+    quantity: item.quantity,
+    unitPrice: calculateProductPrice(item.product, role).sellingPrice,
+  }));
+  const subtotal = Number(items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0).toFixed(2));
+  return evaluateCouponForItems(coupon, userId, items, subtotal, database);
+};
+
 export const applyCoupon = async (userId: string, role: Role, code: string) => {
-  const [coupon, cart] = await Promise.all([prismaClient.coupon.findFirst({ where: { code: normalizeCode(code), deletedAt: null }, include: couponInclude }), prismaClient.cart.findUnique({ where: { userId }, select: couponCartSelect })]);
-  if (!coupon) throw new AppError(404, "Coupon not found"); if (!cart || !cart.items.length) throw new AppError(400, "Your cart is empty");
-  const result = await evaluateCoupon(coupon, userId, cart, role); await prismaClient.cart.update({ where: { id: cart.id }, data: { appliedCouponId: coupon.id } }); return result;
+  const [coupon, cart] = await Promise.all([
+    findCouponByCode(code),
+    prismaClient.cart.findUnique({ where: { userId }, select: couponCartSelect }),
+  ]);
+  if (!coupon) throw new AppError(404, "Coupon not found");
+  if (!cart || !cart.items.length) throw new AppError(400, "Your cart is empty");
+  const result = await evaluateCoupon(coupon, userId, cart, role);
+  await prismaClient.cart.update({ where: { id: cart.id }, data: { appliedCouponId: coupon.id } });
+  return result;
 };
-export const removeCoupon = async (userId: string) => { const cart = await prismaClient.cart.findUnique({ where: { userId }, select: { id: true } }); if (!cart) throw new AppError(404, "Cart not found"); await prismaClient.cart.update({ where: { id: cart.id }, data: { appliedCouponId: null } }); return { removed: true }; };
+
+export const removeCoupon = async (userId: string) => {
+  const cart = await prismaClient.cart.findUnique({ where: { userId }, select: { id: true } });
+  if (!cart) throw new AppError(404, "Cart not found");
+  await prismaClient.cart.update({ where: { id: cart.id }, data: { appliedCouponId: null } });
+  return { removed: true };
+};
+
 export { couponInclude, couponCartSelect };
+
