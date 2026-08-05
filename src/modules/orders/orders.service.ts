@@ -2,6 +2,7 @@ import type { DeliveryArea, OrderStatus, PaymentMethod, PaymentStatus, Prisma, R
 import prismaClient from "../../config/prisma";
 import AppError from "../../utils/AppError";
 import { calculateFinalPrice } from "../pricing/pricing.service";
+import { evaluateCouponForItems, findCouponByCode, type EvaluationItem } from "../coupons/coupons.service";
 import sendEmail from "../../helpers/email";
 import {
   getAdminOrderCreatedEmail,
@@ -92,7 +93,18 @@ type OrderRecordWithItems = {
   discountAmount: number;
   deliveryCharge: number;
   payableAmount: number;
+  originalSubtotal?: number;
+  productDiscount?: number;
+  categoryDiscount?: number;
+  specialDiscount?: number;
+  couponDiscount?: number;
+  shippingCharge?: number;
+  taxAmount?: number;
+  grandTotal?: number;
+  totalSavings?: number;
+  finalPayable?: number;
   couponCode: string | null;
+  couponId?: string | null;
   status: OrderStatus;
   paymentCollected?: boolean;
   createdAt: Date;
@@ -132,6 +144,17 @@ const mapOrder = (order: OrderRecordWithItems): OrderView => {
   const currentPaymentStatus: PaymentStatus = order.payment?.status ?? "PENDING";
   const isPaid = currentPaymentStatus === "PAID";
 
+  const originalSubtotal = order.originalSubtotal ?? order.subtotal;
+  const productDiscount = order.productDiscount ?? 0;
+  const categoryDiscount = order.categoryDiscount ?? 0;
+  const specialDiscount = order.specialDiscount ?? 0;
+  const couponDiscount = order.couponDiscount ?? 0;
+  const shippingCharge = order.shippingCharge ?? order.deliveryCharge;
+  const taxAmount = order.taxAmount ?? 0;
+  const grandTotal = order.grandTotal ?? order.payableAmount;
+  const totalSavings = order.totalSavings ?? order.discountAmount;
+  const finalPayable = order.finalPayable ?? order.payableAmount;
+
   return {
     id: order.id,
     orderCode: order.orderCode,
@@ -161,7 +184,18 @@ const mapOrder = (order: OrderRecordWithItems): OrderView => {
     discountAmount: order.discountAmount,
     deliveryCharge: order.deliveryCharge,
     payableAmount: order.payableAmount,
+    originalSubtotal,
+    productDiscount,
+    categoryDiscount,
+    specialDiscount,
+    couponDiscount,
+    shippingCharge,
+    taxAmount,
+    grandTotal,
+    totalSavings,
+    finalPayable,
     couponCode: order.couponCode,
+    couponId: order.couponId ?? null,
     status: order.status,
     items: order.items.map((item) => mapOrderItem(item, order.status)),
     createdAt: order.createdAt,
@@ -315,22 +349,17 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
       discountType: true,
       discountValue: true,
       productCode: true,
-      categoryRel: { select: { discountPercentage: true, discountEnabled: true } },
+      category: true,
+      categoryRel: { select: { name: true, discountPercentage: true, discountEnabled: true } },
     },
   });
 
   const productMap = new Map(products.map((product) => [product.id, product] as const));
-  const settings = await getCouponSettings();
-
-  const normalizedCouponCode = normalizeText(payload.couponCode);
-  const normalizedSettingsCouponCode = normalizeText(settings.couponCode);
-  const couponIsApplied = Boolean(normalizedCouponCode && settings.couponActive && normalizedCouponCode === normalizedSettingsCouponCode);
-
   const orderRole = currentUser?.role ?? "CUSTOMER";
 
-  const orderItems = payload.products.map((item) => {
+  // Calculate product-level pricing details for each line item
+  const lineDetails = payload.products.map((item) => {
     const product = productMap.get(item.productId);
-
     if (!product) {
       throw new AppError(404, `Product not found for id ${item.productId}`);
     }
@@ -355,23 +384,44 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
     }
 
     const calculated = calculateFinalPrice(product, orderRole);
-    const unitPrice = calculated.finalPrice;
+    const baseUnitPrice = calculated.basePrice;
+    const unitPrice = calculated.sellingPrice;
+    const lineDiscountUnit = calculated.discountAmount;
     const totalPrice = roundToTwo(unitPrice * item.quantity);
+    const originalLineTotal = roundToTwo(baseUnitPrice * item.quantity);
+
+    let lineProductDiscount = 0;
+    let lineCategoryDiscount = 0;
+    let lineSpecialDiscount = 0;
+
+    if (calculated.ruleApplied === "PRODUCT_DISCOUNT") {
+      lineProductDiscount = roundToTwo(lineDiscountUnit * item.quantity);
+    } else if (calculated.ruleApplied === "CATEGORY_DISCOUNT") {
+      lineCategoryDiscount = roundToTwo(lineDiscountUnit * item.quantity);
+    } else if (calculated.ruleApplied === "SALE_PRICE") {
+      lineSpecialDiscount = roundToTwo(lineDiscountUnit * item.quantity);
+    }
 
     return {
-      productId: product.id,
-      productCode: product.productCode,
+      product,
       quantity: item.quantity,
       size: item.size ?? null,
+      baseUnitPrice,
       unitPrice,
       totalPrice,
+      originalLineTotal,
+      lineProductDiscount,
+      lineCategoryDiscount,
+      lineSpecialDiscount,
+      lineDiscountUnit,
     };
   });
 
-  const subtotal = roundToTwo(orderItems.reduce((sum, item) => sum + item.totalPrice, 0));
-  const discountAmount = couponIsApplied ? roundToTwo((subtotal * settings.customerDiscountPercentage) / 100) : 0;
-  const deliveryCharge = roundToTwo(await getAppliedDeliveryCharge(payload.deliveryArea));
-  const payableAmount = roundToTwo(Math.max(0, subtotal - discountAmount + deliveryCharge));
+  const originalSubtotal = roundToTwo(lineDetails.reduce((sum, item) => sum + item.originalLineTotal, 0));
+  const productDiscount = roundToTwo(lineDetails.reduce((sum, item) => sum + item.lineProductDiscount, 0));
+  const categoryDiscount = roundToTwo(lineDetails.reduce((sum, item) => sum + item.lineCategoryDiscount, 0));
+  const specialDiscount = roundToTwo(lineDetails.reduce((sum, item) => sum + item.lineSpecialDiscount, 0));
+  const subtotalAfterProductDiscounts = roundToTwo(lineDetails.reduce((sum, item) => sum + item.totalPrice, 0));
 
   const isGuest = !currentUser;
   const guestName = payload.guestName || payload.customerName || null;
@@ -401,6 +451,79 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
     const orderCode = await generateOrderCode();
     try {
       createdOrder = await prismaClient.$transaction(async (tx) => {
+        // 1. Coupon validation from DB inside transaction (Requirements 3 & 4)
+        let couponDiscount = 0;
+        let couponId: string | null = null;
+        let couponCode: string | null = null;
+
+        const normalizedCode = normalizeText(payload.couponCode);
+        if (normalizedCode) {
+          const coupon = await findCouponByCode(normalizedCode, tx);
+          if (!coupon) {
+            throw new AppError(404, "Coupon not found");
+          }
+
+          const evaluationItems: EvaluationItem[] = lineDetails.map((item) => ({
+            product: item.product,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+          }));
+
+          const evaluated = await evaluateCouponForItems(
+            coupon,
+            isGuest ? null : currentUser?.id,
+            evaluationItems,
+            subtotalAfterProductDiscounts,
+            tx
+          );
+
+          couponDiscount = evaluated.discountAmount;
+          couponId = evaluated.couponId;
+          couponCode = evaluated.couponCode;
+        }
+
+        // 2. Shipping charge resolution inside transaction
+        let shippingCharge = 0;
+        if (payload.shippingMethodId) {
+          const method = await tx.shippingMethod.findFirst({
+            where: { id: payload.shippingMethodId, status: "ACTIVE", deletedAt: null },
+          });
+          if (!method) throw new AppError(400, "Shipping method is not active or does not exist");
+          shippingCharge = method.charge;
+        } else {
+          const settings = await tx.appSetting.findFirst({
+            orderBy: { createdAt: "asc" },
+            select: {
+              insideDhakaDeliveryCharge: true,
+              outsideDhakaDeliveryCharge: true,
+              freeShippingMinOrderAmount: true,
+            },
+          });
+
+          const baseCharge = payload.deliveryArea === "INSIDE_DHAKA"
+            ? (settings?.insideDhakaDeliveryCharge ?? 60)
+            : (settings?.outsideDhakaDeliveryCharge ?? 120);
+
+          const freeShippingMin = settings?.freeShippingMinOrderAmount ?? 2000;
+          if (freeShippingMin > 0 && subtotalAfterProductDiscounts >= freeShippingMin) {
+            shippingCharge = 0;
+          } else {
+            shippingCharge = baseCharge;
+          }
+        }
+        shippingCharge = roundToTwo(shippingCharge);
+
+        const taxAmount = 0;
+        const totalSavings = roundToTwo(productDiscount + categoryDiscount + specialDiscount + couponDiscount);
+        const grandTotal = roundToTwo(Math.max(0, originalSubtotal - totalSavings + shippingCharge + taxAmount));
+        const finalPayable = grandTotal;
+
+        const subtotal = originalSubtotal;
+        const discountAmount = totalSavings;
+        const deliveryCharge = shippingCharge;
+        const payableAmount = grandTotal;
+
+        // 3. Create order with all financial fields (Requirement 5)
         const newOrder = await tx.order.create({
           data: {
             orderCode,
@@ -426,18 +549,51 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
             discountAmount,
             deliveryCharge,
             payableAmount,
-            couponCode: couponIsApplied ? normalizedCouponCode : null,
+            originalSubtotal,
+            productDiscount,
+            categoryDiscount,
+            specialDiscount,
+            couponDiscount,
+            shippingCharge,
+            taxAmount,
+            grandTotal,
+            totalSavings,
+            finalPayable,
+            couponCode,
+            couponId,
+            shippingMethodId: payload.shippingMethodId ?? null,
             status: "PENDING",
             paymentCollected: payload.paymentCollected ?? true,
             items: {
-              create: orderItems,
+              create: lineDetails.map((item) => ({
+                productId: item.product.id,
+                productCode: item.product.productCode,
+                quantity: item.quantity,
+                size: item.size,
+                baseUnitPrice: item.baseUnitPrice,
+                unitPrice: item.unitPrice,
+                discountAmount: item.lineDiscountUnit * item.quantity,
+                totalPrice: item.totalPrice,
+              })),
             },
             payment: { create: { method: selectedPaymentMethod, status: "PENDING" } },
           },
           include: orderCreateInclude,
         });
 
-        // Clear customer cart atomically upon successful order creation
+        // 4. Create coupon usage record (Requirement 6)
+        if (couponId) {
+          await tx.couponUsage.create({
+            data: {
+              couponId,
+              userId: isGuest ? null : currentUser?.id ?? null,
+              orderId: newOrder.id,
+              discountAmount: couponDiscount,
+            },
+          });
+        }
+
+        // 5. Clear customer cart atomically upon successful order creation
         if (!isGuest && currentUser?.id) {
           await tx.cartItem.deleteMany({
             where: {
@@ -478,7 +634,7 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
     try {
       const customerEmailToUse = createdOrder!.userEmail || createdOrder!.guestEmail;
 
-      // 1. Admin Email Notification (Requirement 8)
+      // 1. Admin Email Notification (Requirement 7)
       const adminHtml = getAdminOrderCreatedEmail({
         orderCode: createdOrder!.orderCode,
         orderDate: createdOrder!.createdAt,
@@ -495,10 +651,10 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
         orderNotes: createdOrder!.orderNotes,
         paymentMethod: "COD (Cash On Delivery)",
         items: createdOrder!.items,
-        subtotal: createdOrder!.subtotal,
-        discountAmount: createdOrder!.discountAmount,
-        deliveryCharge: createdOrder!.deliveryCharge,
-        payableAmount: createdOrder!.payableAmount,
+        subtotal: createdOrder!.originalSubtotal || createdOrder!.subtotal,
+        discountAmount: createdOrder!.totalSavings || createdOrder!.discountAmount,
+        deliveryCharge: createdOrder!.shippingCharge || createdOrder!.deliveryCharge,
+        payableAmount: createdOrder!.grandTotal || createdOrder!.payableAmount,
         couponCode: createdOrder!.couponCode,
         status: createdOrder!.status,
       });
@@ -531,11 +687,11 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
           orderNotes: createdOrder!.orderNotes,
           paymentMethod: "COD (Cash On Delivery)",
           items: createdOrder!.items,
-          subtotal: createdOrder!.subtotal,
-          discountAmount: createdOrder!.discountAmount,
-          deliveryCharge: createdOrder!.deliveryCharge,
+          subtotal: createdOrder!.originalSubtotal || createdOrder!.subtotal,
+          discountAmount: createdOrder!.totalSavings || createdOrder!.discountAmount,
+          deliveryCharge: createdOrder!.shippingCharge || createdOrder!.deliveryCharge,
           couponCode: createdOrder!.couponCode,
-          payableAmount: createdOrder!.payableAmount,
+          payableAmount: createdOrder!.grandTotal || createdOrder!.payableAmount,
         });
 
         await sendEmail({
@@ -550,7 +706,7 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
     }
   });
 
-  return mapOrder(createdOrder);
+  return mapOrder(createdOrder as any);
 };
 
 export const getMyOrders = async (currentUser: CreateOrderRequestUser): Promise<OrderView[]> => {
