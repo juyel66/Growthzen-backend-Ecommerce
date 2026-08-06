@@ -225,7 +225,7 @@ model AppSetting {
   // Delivery Settings
   insideDhakaDeliveryCharge  Float    @default(60)
   outsideDhakaDeliveryCharge Float    @default(120)
-  freeShippingMinOrderAmount Float    @default(2000)
+  freeShippingMinOrderAmount Float    @default(0)
   estimatedDeliveryDays      Int      @default(3)
 
   // Payment Settings
@@ -323,6 +323,13 @@ model Order {
   courierName           String?
   deliveryStatus        DeliveryStatus       @default(PENDING)
   couponId              String?
+  courierServiceCost    Float?
+  deliveryProfit        Float?
+  productCost           Float?
+  grossSales            Float?
+  netProfit             Float?
+  customerPaid          Float?
+  productSellingTotal   Float?
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   user                  User?                @relation(fields: [userId], references: [id])
@@ -333,14 +340,65 @@ model Order {
   shippingMethod        ShippingMethod?      @relation(fields: [shippingMethodId], references: [id], onDelete: SetNull)
   coupon                Coupon?              @relation(fields: [couponId], references: [id], onDelete: SetNull)
   couponUsage           CouponUsage?
+  invoice               Invoice?
 
+  @@index([userId, status, createdAt])
+  @@index([orderCode])
   @@index([shippingMethodId])
   @@index([couponId])
   @@index([deliveryStatus])
   @@index([guestPhone])
   @@index([guestEmail])
   @@index([customerPhone])
-  @@index([userEmail])
+}
+
+model Invoice {
+  id                String   @id @default(cuid())
+  invoiceNumber     String   @unique
+  orderId           String   @unique
+  verificationToken String   @unique
+  invoiceDate       DateTime @default(now())
+
+  // Snapshot details
+  orderNumber       String
+  orderDate         DateTime
+  paymentMethod     String
+  paymentStatus     String
+  orderStatus       String
+
+  // Customer snapshot
+  customerName      String?
+  customerPhone     String?
+  customerEmail     String?
+
+  // Shipping snapshot
+  shippingAddress   String?
+  shippingDistrict  String?
+  shippingDivision  String?
+  shippingType      String?
+  shippingArea      String?
+
+  // Products snapshot
+  productsJson      Json
+
+  // Accounting snapshot
+  subtotal          Float
+  discount          Float
+  deliveryCharge    Float
+  grandTotal        Float
+  productCost       Float
+  courierCost       Float
+  courierProfit     Float
+  netProfit         Float
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  order             Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([verificationToken])
+  @@index([invoiceNumber])
+  @@index([orderId])
 }
 
 model OrderStatusHistory {
@@ -385,6 +443,7 @@ model OrderItem {
   size           String?
   unitPrice      Float
   baseUnitPrice  Float?
+  purchaseCost   Float   @default(0)
   discountAmount Float   @default(0)
   totalPrice     Float
   order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
