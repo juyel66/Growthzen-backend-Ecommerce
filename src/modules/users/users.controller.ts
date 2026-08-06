@@ -2,11 +2,20 @@ import type { Request, Response } from "express";
 import AppError from "../../utils/AppError";
 import catchAsync from "../../utils/catchAsync";
 import sendResponse from "../../utils/sendResponse";
-import { deleteUser, getUserById, getUsers, updateUserRole } from "./users.service";
+import { deleteUser, getUserById, getUsers, getUserStats, updateUserRole } from "./users.service";
 
 const getParamId = (value: string | string[]): string => {
   return Array.isArray(value) ? value[0] : value;
 };
+
+export const getUserStatsHandler = catchAsync(async (_req: Request, res: Response) => {
+  const stats = await getUserStats();
+
+  sendResponse(res, {
+    message: "User statistics retrieved successfully",
+    data: stats,
+  });
+});
 
 export const listUsers = catchAsync(async (_req: Request, res: Response) => {
   const users = await getUsers();
