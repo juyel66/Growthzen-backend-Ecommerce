@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { authenticate, authorizeRoles } from "../../middlewares/auth";
 import validateRequest from "../../middlewares/validateRequest";
-import { changeUserRole, getUserDetails, listUsers, removeUser } from "./users.controller";
+import { changeUserRole, getUserDetails, getUserStatsHandler, listUsers, removeUser } from "./users.controller";
 import { updateUserRoleValidationSchema } from "./users.validation";
 
 const router = Router();
@@ -41,6 +41,36 @@ router.use(authenticate, authorizeRoles("ADMIN", "SUPER_ADMIN"));
  *         description: Forbidden - Only ADMIN and SUPER_ADMIN can access
  */
 router.get("/", listUsers);
+
+/**
+ * @swagger
+ * /users/stats:
+ *   get:
+ *     summary: Get User Management Statistics
+ *     tags:
+ *       - Users
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: User statistics retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: User statistics retrieved successfully }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     totalUsers: { type: integer, example: 1250 }
+ *                     totalCustomers: { type: integer, example: 1198 }
+ *                     totalAdmins: { type: integer, example: 50 }
+ *                     totalSuperAdmins: { type: integer, example: 2 }
+ *                     newUsersToday: { type: integer, example: 18 }
+ */
+router.get("/stats", getUserStatsHandler);
 
 /**
  * @swagger
