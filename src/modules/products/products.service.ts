@@ -229,11 +229,86 @@ const resolveAndValidateCategory = async (
   throw new AppError(400, "Category is required");
 };
 
+export const generateUniqueSku = async (categoryName?: string): Promise<string> => {
+  let prefix = "";
+  if (categoryName && categoryName.trim()) {
+    const lettersOnly = categoryName.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    prefix = lettersOnly.slice(0, 3);
+  }
+  if (!prefix) {
+    prefix = "PRD";
+  }
+  while (prefix.length < 3) {
+    prefix += "X";
+  }
+
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  for (let attempt = 0; attempt < 50; attempt++) {
+    let randomStr = "";
+    for (let i = 0; i < 8; i++) {
+      randomStr += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    const sku = `${prefix}-${randomStr}`;
+    const existing = await prismaClient.product.findFirst({
+      where: { productCode: sku },
+      select: { id: true },
+    });
+    if (!existing) {
+      return sku;
+    }
+  }
+  throw new AppError(500, "Failed to generate unique SKU after multiple attempts");
+};
+
+export const generateUniqueBarcode = async (): Promise<string> => {
+  const digits = "0123456789";
+  for (let attempt = 0; attempt < 50; attempt++) {
+    let barcode = "";
+    for (let i = 0; i < 13; i++) {
+      if (i === 0) {
+        barcode += digits.charAt(Math.floor(Math.random() * 9) + 1);
+      } else {
+        barcode += digits.charAt(Math.floor(Math.random() * 10));
+      }
+    }
+    const existing = await prismaClient.product.findFirst({
+      where: { barcode },
+      select: { id: true },
+    });
+    if (!existing) {
+      return barcode;
+    }
+  }
+  throw new AppError(500, "Failed to generate unique barcode after multiple attempts");
+};
+
+export const generateIdentifiers = async (
+  categoryId?: string,
+  categoryText?: string
+): Promise<{ sku: string; barcode: string }> => {
+  let categoryName: string | undefined = undefined;
+  if (categoryId || categoryText) {
+    try {
+      const resolved = await resolveAndValidateCategory(categoryId, categoryText);
+      categoryName = resolved.categoryName;
+    } catch {
+      if (categoryText) categoryName = categoryText;
+    }
+  }
+  const [sku, barcode] = await Promise.all([
+    generateUniqueSku(categoryName),
+    generateUniqueBarcode(),
+  ]);
+  return { sku, barcode };
+};
+
 const toCreateData = (
   payload: ProductCreateInput,
   slug: string,
   createdById: string,
-  resolvedCategory: { categoryId: string; categoryName: string }
+  resolvedCategory: { categoryId: string; categoryName: string },
+  finalProductCode: string,
+  finalBarcode: string
 ): Prisma.ProductCreateInput => {
   const specialSaleEnabled = payload.specialSaleEnabled ?? false;
   const discountEnabled = payload.discountEnabled ?? false;
@@ -242,8 +317,8 @@ const toCreateData = (
     shortDescription: payload.shortDescription,
     description: payload.description,
     slug,
-    productCode: payload.productCode,
-    barcode: payload.barcode ?? null,
+    productCode: finalProductCode,
+    barcode: finalBarcode,
     category: resolvedCategory.categoryName,
     categoryRel: { connect: { id: resolvedCategory.categoryId } },
     costPrice: payload.costPrice,
@@ -267,10 +342,35 @@ const toCreateData = (
 };
 
 export const createProduct = async (payload: ProductCreateInput, createdById: string): Promise<ProductView> => {
-  await assertUniqueIdentifiers(payload.productCode, payload.barcode);
   const resolvedCategory = await resolveAndValidateCategory(payload.categoryId, payload.category);
+
+  // Auto SKU or manual validation
+  let finalProductCode: string;
+  if (payload.productCode && payload.productCode.trim().length > 0) {
+    await assertUniqueIdentifiers(payload.productCode.trim(), undefined);
+    finalProductCode = payload.productCode.trim();
+  } else {
+    finalProductCode = await generateUniqueSku(resolvedCategory.categoryName);
+  }
+
+  // Auto Barcode or manual validation
+  let finalBarcode: string;
+  if (payload.barcode && payload.barcode.trim().length > 0) {
+    await assertUniqueIdentifiers(undefined, payload.barcode.trim());
+    finalBarcode = payload.barcode.trim();
+  } else {
+    finalBarcode = await generateUniqueBarcode();
+  }
+
   const product = await prismaClient.product.create({
-    data: toCreateData(payload, await buildUniqueSlug(payload.title), createdById, resolvedCategory),
+    data: toCreateData(
+      payload,
+      await buildUniqueSlug(payload.title),
+      createdById,
+      resolvedCategory,
+      finalProductCode,
+      finalBarcode
+    ),
     include: productInclude,
   });
   return mapProduct(product, "ADMIN");
@@ -293,7 +393,7 @@ export const updateProduct = async (id: string, payload: ProductUpdateInput): Pr
     select: { id: true, attributes: true, thumbnailImage: true, productImages: true, productVideos: true, categoryId: true, category: true },
   });
   if (!existing) throw new AppError(404, "Product not found");
-  await assertUniqueIdentifiers(payload.productCode, payload.barcode, id);
+  await assertUniqueIdentifiers(payload.productCode, payload.barcode ?? undefined, id);
 
   const { attributes, enableSize, availableSizes, title, categoryId, category, deletedProductImages, deleteThumbnail, ...fields } = payload;
   if (fields.specialSaleEnabled === false) {
