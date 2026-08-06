@@ -41,17 +41,33 @@ export const getPublicInvoiceHandler = catchAsync(async (req: Request, res: Resp
 export const getAllInvoicesHandler = catchAsync(async (req: Request, res: Response) => {
   const result = await getAllInvoicesService(req.query);
 
+  const summary = {
+    totalInvoices: result.summaryStats.totalInvoices,
+    totalSales: result.summaryStats.totalSales,
+    todayInvoices: result.summaryStats.todayInvoices,
+    todaySales: result.summaryStats.todayGrandTotal,
+  };
+
+  const pagination = {
+    page: result.meta.page,
+    limit: result.meta.limit,
+    total: result.meta.total,
+    totalPage: result.meta.totalPage,
+  };
+
   sendResponse(res, {
     message: "Invoices retrieved successfully",
     meta: result.meta,
     data: {
+      invoices: result.data,
+      pagination,
+      summary,
       summaryStats: result.summaryStats,
       totalInvoices: result.summaryStats.totalInvoices,
       totalSales: result.summaryStats.totalSales,
       totalGrandTotal: result.summaryStats.totalGrandTotal,
       todayInvoices: result.summaryStats.todayInvoices,
       todayGrandTotal: result.summaryStats.todayGrandTotal,
-      invoices: result.data,
     },
   });
 });
