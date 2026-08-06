@@ -1,7 +1,48 @@
 import type { Role, User } from "@prisma/client";
 import prismaClient from "../../config/prisma";
 import AppError from "../../utils/AppError";
-import type { UpdateUserRoleInput, UserListItem } from "./users.interface";
+import type { UpdateUserRoleInput, UserListItem, UserStatsView } from "./users.interface";
+
+const startOfDay = (d: Date): Date => {
+  const res = new Date(d);
+  res.setHours(0, 0, 0, 0);
+  return res;
+};
+
+const endOfDay = (d: Date): Date => {
+  const res = new Date(d);
+  res.setHours(23, 59, 59, 999);
+  return res;
+};
+
+export const getUserStats = async (): Promise<UserStatsView> => {
+  const now = new Date();
+  const todayStart = startOfDay(now);
+  const todayEnd = endOfDay(now);
+
+  const [totalUsers, totalCustomers, totalAdmins, totalSuperAdmins, newUsersToday] = await Promise.all([
+    prismaClient.user.count(),
+    prismaClient.user.count({ where: { role: "CUSTOMER" } }),
+    prismaClient.user.count({ where: { role: "ADMIN" } }),
+    prismaClient.user.count({ where: { role: "SUPER_ADMIN" } }),
+    prismaClient.user.count({
+      where: {
+        createdAt: {
+          gte: todayStart,
+          lte: todayEnd,
+        },
+      },
+    }),
+  ]);
+
+  return {
+    totalUsers,
+    totalCustomers,
+    totalAdmins,
+    totalSuperAdmins,
+    newUsersToday,
+  };
+};
 
 const listUserSelect = {
   id: true,
