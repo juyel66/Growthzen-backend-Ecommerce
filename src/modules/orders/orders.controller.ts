@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import AppError from "../../utils/AppError";
 import catchAsync from "../../utils/catchAsync";
 import sendResponse from "../../utils/sendResponse";
-import { cancelMyOrder, createOrder, getMyOrders, getOrderById, getOrders, updateOrderStatus, trackOrder } from "./orders.service";
+import { cancelOrder, cancelMyOrder, createOrder, getMyOrders, getOrderById, getOrderInvoice, getOrders, getOrderSummary, updateOrderStatus, trackOrder } from "./orders.service";
 
 const getParamId = (value: string | string[]): string => (Array.isArray(value) ? value[0] : value);
 
@@ -94,6 +94,27 @@ export const getOrderByIdHandler = catchAsync(async (req: Request, res: Response
   });
 });
 
+export const getOrderInvoiceHandler = catchAsync(async (req: Request, res: Response) => {
+  const currentUser = req.user;
+  const rawId = req.params.id ?? req.params.orderId;
+  const orderId = getParamId(rawId);
+
+  if (!orderId) {
+    throw new AppError(400, "Order id is required");
+  }
+
+  const invoice = await getOrderInvoice(orderId, currentUser ? {
+    id: currentUser.id,
+    role: currentUser.role,
+    email: currentUser.email,
+  } : undefined);
+
+  sendResponse(res, {
+    message: "Invoice retrieved successfully",
+    data: invoice,
+  });
+});
+
 export const getOrdersHandler = catchAsync(async (req: Request, res: Response) => {
   const query = req.query as Record<string, unknown>;
 
@@ -107,6 +128,21 @@ export const getOrdersHandler = catchAsync(async (req: Request, res: Response) =
   sendResponse(res, {
     message: "Orders retrieved successfully",
     data: orders,
+  });
+});
+
+export const getOrderSummaryHandler = catchAsync(async (req: Request, res: Response) => {
+  const query = req.query as Record<string, unknown>;
+
+  const summary = await getOrderSummary({
+    from: getQueryValue(query.from),
+    to: getQueryValue(query.to),
+    status: getQueryValue(query.status),
+  });
+
+  sendResponse(res, {
+    message: "Order summary retrieved successfully",
+    data: summary,
   });
 });
 
@@ -152,11 +188,16 @@ export const trackOrderHandler = catchAsync(async (req: Request, res: Response) 
   });
 });
 
-export const cancelMyOrderHandler = catchAsync(async (req: Request, res: Response) => {
+export const cancelOrderHandler = catchAsync(async (req: Request, res: Response) => {
   const currentUser = req.user;
-  const orderId = getParamId(req.params.orderId);
+  const rawId = req.params.id ?? req.params.orderId;
+  console.log("Cancel Order ID:", req.params.id);
+
+  const orderId = getParamId(rawId);
   if (!currentUser) throw new AppError(401, "User is not authenticated");
   if (!orderId) throw new AppError(400, "Order id is required");
-  const order = await cancelMyOrder(orderId, { id: currentUser.id, role: currentUser.role, email: currentUser.email });
+  const order = await cancelOrder(orderId, { id: currentUser.id, role: currentUser.role, email: currentUser.email });
   sendResponse(res, { message: "Order cancelled successfully", data: order });
 });
+
+export const cancelMyOrderHandler = cancelOrderHandler;
