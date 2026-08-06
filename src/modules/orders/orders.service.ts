@@ -1,4 +1,4 @@
-import type { DeliveryArea, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Role } from "@prisma/client";
+import { OrderStatus, type DeliveryArea, type PaymentMethod, type PaymentStatus, type Prisma, type Role } from "@prisma/client";
 import prismaClient from "../../config/prisma";
 import AppError from "../../utils/AppError";
 import { calculateFinalPrice } from "../pricing/pricing.service";
@@ -9,11 +9,15 @@ import {
   getCustomerOrderReceivedEmail,
   getOrderStatusUpdateEmail,
 } from "../../helpers/emailTemplates";
+import { createOrGetInvoice } from "../invoices/invoices.service";
 import type {
   CreateOrderInput,
   CreateOrderRequestUser,
+  OrderInvoiceView,
   OrderListQuery,
   OrderListResponse,
+  OrderSummaryQueryInput,
+  OrderSummaryResponse,
   OrderView,
   UpdateOrderStatusInput,
 } from "./orders.interface";
@@ -27,6 +31,7 @@ const orderInclude = {
       quantity: true,
       size: true,
       unitPrice: true,
+      purchaseCost: true,
       totalPrice: true,
       review: { select: { id: true } },
     },
@@ -43,6 +48,7 @@ const orderCreateInclude = {
       quantity: true,
       size: true,
       unitPrice: true,
+      purchaseCost: true,
       totalPrice: true,
     },
   },
@@ -64,6 +70,7 @@ type OrderItemRecord = {
   quantity: number;
   size: string | null;
   unitPrice: number;
+  purchaseCost?: number;
   totalPrice: number;
   review?: { id: string } | null;
 };
@@ -105,6 +112,13 @@ type OrderRecordWithItems = {
   finalPayable?: number;
   couponCode: string | null;
   couponId?: string | null;
+  courierServiceCost?: number | null;
+  productCost?: number | null;
+  customerPaid?: number | null;
+  grossSales?: number | null;
+  productSellingTotal?: number | null;
+  netProfit?: number | null;
+  deliveryProfit?: number | null;
   status: OrderStatus;
   paymentCollected?: boolean;
   createdAt: Date;
@@ -117,7 +131,7 @@ type OrderRecordWithItems = {
   payment: {
     id: string;
     method: PaymentMethod;
-    status: "PENDING" | "PAID" | "FAILED" | "CANCELLED" | "REFUNDED";
+    status: PaymentStatus;
     transactionId: string | null;
     paidAmount: number | null;
   } | null;
@@ -134,6 +148,7 @@ const mapOrderItem = (item: OrderItemRecord, orderStatus: OrderStatus): OrderVie
   quantity: item.quantity,
   size: item.size,
   unitPrice: item.unitPrice,
+  purchaseCost: item.purchaseCost ?? 0,
   totalPrice: item.totalPrice,
   canReview: orderStatus === "DELIVERED",
   reviewed: Boolean(item.review),
@@ -154,6 +169,14 @@ const mapOrder = (order: OrderRecordWithItems): OrderView => {
   const grandTotal = order.grandTotal ?? order.payableAmount;
   const totalSavings = order.totalSavings ?? order.discountAmount;
   const finalPayable = order.finalPayable ?? order.payableAmount;
+
+  const isDelivered = order.status === "DELIVERED";
+  const customerPaid = order.customerPaid ?? (isDelivered ? order.payableAmount : null);
+  const grossSales = order.grossSales ?? (isDelivered ? (order.customerPaid ?? order.payableAmount) : null);
+  const productSellingTotal = order.productSellingTotal ?? (isDelivered ? order.subtotal : null);
+  const productCost = order.productCost ?? null;
+  const courierServiceCost = order.courierServiceCost ?? null;
+  const netProfit = order.netProfit ?? (isDelivered && customerPaid != null ? roundToTwo(customerPaid - (productCost ?? 0) - (courierServiceCost ?? 0)) : null);
 
   return {
     id: order.id,
@@ -196,6 +219,13 @@ const mapOrder = (order: OrderRecordWithItems): OrderView => {
     finalPayable,
     couponCode: order.couponCode,
     couponId: order.couponId ?? null,
+    customerPaid,
+    grossSales,
+    productSellingTotal,
+    productCost,
+    courierServiceCost,
+    netProfit,
+    deliveryProfit: order.deliveryProfit ?? null,
     status: order.status,
     items: order.items.map((item) => mapOrderItem(item, order.status)),
     createdAt: order.createdAt,
@@ -340,6 +370,7 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
     where: { id: { in: productIds } },
     select: {
       id: true,
+      costPrice: true,
       attributes: true,
       customerSellPrice: true,
       salePrice: true,
@@ -504,7 +535,7 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
             ? (settings?.insideDhakaDeliveryCharge ?? 60)
             : (settings?.outsideDhakaDeliveryCharge ?? 120);
 
-          const freeShippingMin = settings?.freeShippingMinOrderAmount ?? 2000;
+          const freeShippingMin = settings?.freeShippingMinOrderAmount ?? 0;
           if (freeShippingMin > 0 && subtotalAfterProductDiscounts >= freeShippingMin) {
             shippingCharge = 0;
           } else {
@@ -572,6 +603,7 @@ export const createOrder = async (payload: CreateOrderInput, currentUser?: Creat
                 size: item.size,
                 baseUnitPrice: item.baseUnitPrice,
                 unitPrice: item.unitPrice,
+                purchaseCost: item.product.costPrice ?? 0,
                 discountAmount: item.lineDiscountUnit * item.quantity,
                 totalPrice: item.totalPrice,
               })),
@@ -829,6 +861,15 @@ export const updateOrderStatus = async (
           },
         });
       }
+    } else if (newOrderStatus === "CANCELLED") {
+      const existingPayment = existingOrder.payment ?? await tx.payment.findUnique({ where: { orderId: existingOrder.id } });
+      if (existingPayment && existingPayment.status === "PENDING") {
+        await tx.payment.update({
+          where: { id: existingPayment.id },
+          data: { status: "CANCELLED" },
+        });
+        newPaymentStatus = "CANCELLED";
+      }
     }
 
     const orderStatusChanged = previousOrderStatus !== newOrderStatus;
@@ -860,6 +901,52 @@ export const updateOrderStatus = async (
       }
     }
 
+    if (payload.courierServiceCost !== undefined) {
+      updateData.courierServiceCost = payload.courierServiceCost;
+    }
+
+    if (newOrderStatus === "DELIVERED") {
+      const courierServiceCost = payload.courierServiceCost ?? existingOrder.courierServiceCost ?? 0;
+
+      const orderItemsWithProducts = await tx.orderItem.findMany({
+        where: { orderId: existingOrder.id },
+        include: { product: { select: { costPrice: true } } },
+      });
+
+      let productCost = 0;
+      for (const item of orderItemsWithProducts) {
+        const itemPurchaseCost = (item.purchaseCost && item.purchaseCost > 0)
+          ? item.purchaseCost
+          : (item.product?.costPrice ?? 0);
+
+        if (!item.purchaseCost || item.purchaseCost === 0) {
+          if (itemPurchaseCost > 0) {
+            await tx.orderItem.update({
+              where: { id: item.id },
+              data: { purchaseCost: itemPurchaseCost },
+            });
+          }
+        }
+
+        productCost += itemPurchaseCost * item.quantity;
+      }
+      productCost = roundToTwo(productCost);
+
+      const customerPaid = roundToTwo(existingOrder.payableAmount);
+      const productSellingTotal = roundToTwo(existingOrder.subtotal);
+      const grossSales = customerPaid;
+      const netProfit = roundToTwo(customerPaid - productCost - courierServiceCost);
+      const courierProfit = roundToTwo((existingOrder.deliveryCharge ?? 0) - courierServiceCost);
+
+      updateData.courierServiceCost = courierServiceCost;
+      updateData.customerPaid = customerPaid;
+      updateData.productSellingTotal = productSellingTotal;
+      updateData.productCost = productCost;
+      updateData.grossSales = grossSales;
+      updateData.deliveryProfit = courierProfit;
+      updateData.netProfit = netProfit;
+    }
+
     if (mappedPaymentStatus) {
       updateData.paymentCollected = mappedPaymentStatus === "PAID";
     } else if (payload.paymentCollected !== undefined) {
@@ -870,12 +957,39 @@ export const updateOrderStatus = async (
       updateData.adminNote = payload.adminNote;
     }
 
-    return tx.order.update({
+    const finalUpdatedOrder = await tx.order.update({
       where: { id: existingOrder.id },
       data: updateData,
       include: orderInclude,
     });
+
+    // Sync any existing Invoice record in DB
+    try {
+      await tx.invoice.updateMany({
+        where: { orderId: existingOrder.id },
+        data: {
+          paymentStatus: newPaymentStatus,
+          orderStatus: newOrderStatus,
+          grandTotal: finalUpdatedOrder.payableAmount,
+          deliveryCharge: finalUpdatedOrder.deliveryCharge,
+          discount: finalUpdatedOrder.discountAmount,
+          subtotal: finalUpdatedOrder.subtotal,
+        },
+      });
+    } catch {
+      // Ignore if invoice table update fails
+    }
+
+    return finalUpdatedOrder;
   });
+
+  if (updatedOrder.status === "DELIVERED") {
+    try {
+      await createOrGetInvoice(updatedOrder.id);
+    } catch {
+      // Non-blocking fallback if already generated
+    }
+  }
 
   // Trigger status update email asynchronously
   if (statusChanged && updatedOrder.userEmail) {
@@ -959,27 +1073,148 @@ export const trackOrder = async (orderCode: string, phone?: string): Promise<Ord
   };
 };
 
-export const cancelMyOrder = async (orderId: string, currentUser: CreateOrderRequestUser): Promise<OrderView> => {
-  const order = await prismaClient.order.findFirst({
-    where: { OR: [{ id: orderId }, { orderCode: orderId }], userId: currentUser.id },
+export const cancelOrder = async (orderId: string, currentUser: CreateOrderRequestUser): Promise<OrderView> => {
+  const existingOrder = await prismaClient.order.findFirst({
+    where: {
+      OR: [
+        { id: orderId },
+        { orderCode: orderId },
+      ],
+    },
     include: orderInclude,
   });
-  if (!order) throw new AppError(404, "Order not found");
-  if (order.status !== "PENDING") throw new AppError(400, "Only pending orders can be cancelled");
 
-  const updated = await prismaClient.$transaction(async (transaction) => {
-    await transaction.orderStatusHistory.create({
-      data: { orderId: order.id, previousStatus: order.status, newStatus: "CANCELLED", changedById: currentUser.id },
-    });
-    await transaction.payment.updateMany({
-      where: { orderId: order.id, status: "PENDING" },
-      data: { status: "CANCELLED" },
-    });
-    return transaction.order.update({
-      where: { id: order.id },
-      data: { status: "CANCELLED", cancelledAt: new Date() },
-      include: orderInclude,
-    });
-  });
-  return mapOrder(updated);
+  if (!existingOrder) {
+    throw new AppError(404, "Order not found");
+  }
+
+  assertOrderOwnership(existingOrder, currentUser);
+
+  if (currentUser.role !== "ADMIN" && currentUser.role !== "SUPER_ADMIN" && existingOrder.status !== "PENDING") {
+    throw new AppError(400, "Only pending orders can be cancelled");
+  }
+
+  return updateOrderStatus(existingOrder.id, { status: "CANCELLED" }, currentUser);
 };
+
+const startOfDayDate = (d: Date): Date => {
+  const res = new Date(d);
+  res.setHours(0, 0, 0, 0);
+  return res;
+};
+
+const endOfDayDate = (d: Date): Date => {
+  const res = new Date(d);
+  res.setHours(23, 59, 59, 999);
+  return res;
+};
+
+export const getOrderSummary = async (query: OrderSummaryQueryInput): Promise<OrderSummaryResponse> => {
+  const where: Prisma.OrderWhereInput = {};
+
+  if (query.status) {
+    const rawStatus = query.status.trim().toUpperCase();
+    if (Object.values(OrderStatus).includes(rawStatus as OrderStatus)) {
+      where.status = rawStatus as OrderStatus;
+    }
+  } else {
+    where.status = "DELIVERED";
+  }
+
+  if (query.from || query.to) {
+    where.createdAt = {};
+    if (query.from) {
+      const fromDate = new Date(query.from);
+      if (!isNaN(fromDate.getTime())) {
+        where.createdAt.gte = startOfDayDate(fromDate);
+      }
+    }
+    if (query.to) {
+      const toDate = new Date(query.to);
+      if (!isNaN(toDate.getTime())) {
+        where.createdAt.lte = endOfDayDate(toDate);
+      }
+    }
+  }
+
+  const now = new Date();
+  const todayWhere: Prisma.OrderWhereInput = {
+    ...where,
+    createdAt: {
+      ...(where.createdAt as Prisma.DateTimeFilter | undefined),
+      gte: startOfDayDate(now),
+      lte: endOfDayDate(now),
+    },
+  };
+
+  const [totalOrders, overallAgg, todayAgg] = await Promise.all([
+    prismaClient.order.count({ where }),
+    prismaClient.order.aggregate({
+      where,
+      _sum: {
+        customerPaid: true,
+        payableAmount: true,
+        productCost: true,
+        courierServiceCost: true,
+        netProfit: true,
+      },
+    }),
+    prismaClient.order.aggregate({
+      where: todayWhere,
+      _sum: {
+        customerPaid: true,
+        payableAmount: true,
+        productCost: true,
+        courierServiceCost: true,
+        netProfit: true,
+      },
+    }),
+  ]);
+
+  const totalSales = roundToTwo(overallAgg._sum.customerPaid ?? overallAgg._sum.payableAmount ?? 0);
+  const totalProductCost = roundToTwo(overallAgg._sum.productCost ?? 0);
+  const totalCourierCost = roundToTwo(overallAgg._sum.courierServiceCost ?? 0);
+  const totalNetProfit = roundToTwo(totalSales - totalProductCost - totalCourierCost);
+
+  const todaySales = roundToTwo(todayAgg._sum.customerPaid ?? todayAgg._sum.payableAmount ?? 0);
+  const todayProductCost = roundToTwo(todayAgg._sum.productCost ?? 0);
+  const todayCourierCost = roundToTwo(todayAgg._sum.courierServiceCost ?? 0);
+  const todayProfit = roundToTwo(todaySales - todayProductCost - todayCourierCost);
+
+  return {
+    totalOrders,
+    totalSales,
+    totalProductCost,
+    totalCourierCost,
+    totalNetProfit,
+    todaySales,
+    todayProfit,
+  };
+};
+
+export const getOrderInvoice = async (
+  orderId: string,
+  currentUser?: CreateOrderRequestUser
+): Promise<OrderInvoiceView> => {
+  const existingOrder = await prismaClient.order.findFirst({
+    where: {
+      OR: [
+        { id: orderId },
+        { orderCode: orderId },
+      ],
+    },
+    select: { id: true, userId: true, userEmail: true, customerEmail: true, guestEmail: true, status: true },
+  });
+
+  if (!existingOrder) {
+    throw new AppError(404, "Order not found");
+  }
+
+  if (currentUser) {
+    assertOrderOwnership(existingOrder, currentUser);
+  }
+
+  return createOrGetInvoice(existingOrder.id);
+};
+
+export const cancelMyOrder = cancelOrder;
