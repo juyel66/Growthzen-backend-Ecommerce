@@ -5,6 +5,7 @@ import validateRequest from "../../middlewares/validateRequest";
 import {
   createProductHandler,
   deleteProductHandler,
+  generateProductIdentifiersHandler,
   getProductByIdHandler,
   getProductsHandler,
   updateProductHandler,
@@ -39,6 +40,22 @@ const router = Router();
  *                   items: { $ref: '#/components/schemas/ProductResponse' }
  */
 router.get("/", optionalAuthenticate, getProductsHandler);
+
+/**
+ * @swagger
+ * /products/generate-identifiers:
+ *   get:
+ *     summary: Lightweight endpoint to generate SKU and 13-digit barcode
+ *     tags: [Products]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: category, schema: { type: string }, description: "Category name" }
+ *       - { in: query, name: categoryId, schema: { type: string }, description: "Category ID" }
+ *     responses:
+ *       200:
+ *         description: Identifiers generated successfully
+ */
+router.get("/generate-identifiers", optionalAuthenticate, generateProductIdentifiersHandler);
 
 /**
  * @swagger
