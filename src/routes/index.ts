@@ -15,6 +15,7 @@ import shippingRoutes from "../modules/shipping/shipping.route";
 import couponRoutes from "../modules/coupons/coupons.route";
 import reportRoutes from "../modules/reports/reports.route";
 import categoryRoutes from "../modules/categories/category.route";
+import invoiceRoutes, { publicInvoiceRouter } from "../modules/invoices/invoices.route";
 
 const router = Router();
 
@@ -32,6 +33,8 @@ router.use("/shipping", shippingRoutes);
 router.use("/coupons", couponRoutes);
 router.use("/settings", settingsRoutes);
 router.use("/orders", orderRoutes);
+router.use("/invoices", invoiceRoutes);
+router.use("/public", publicInvoiceRouter);
 router.use("/dashboard", dashboardRoutes);
 router.use("/dashboard-management", dashboardRoutes);
 router.use("/reports", reportRoutes);
