@@ -2,7 +2,19 @@ import type { Request, Response } from "express";
 import AppError from "../../utils/AppError";
 import catchAsync from "../../utils/catchAsync";
 import sendResponse from "../../utils/sendResponse";
-import { createProduct, deleteProduct, getProductById, getProducts, updateProduct } from "./products.service";
+import { createProduct, deleteProduct, generateIdentifiers, getProductById, getProducts, updateProduct } from "./products.service";
+
+export const generateProductIdentifiersHandler = catchAsync(async (req: Request, res: Response) => {
+  const categoryId = typeof req.query.categoryId === "string" ? req.query.categoryId : undefined;
+  const categoryText = typeof req.query.category === "string" ? req.query.category : undefined;
+
+  const data = await generateIdentifiers(categoryId, categoryText);
+
+  sendResponse(res, {
+    message: "Identifiers generated successfully",
+    data,
+  });
+});
 
 const getParamId = (value: string | string[]): string => {
   return Array.isArray(value) ? value[0] : value;
