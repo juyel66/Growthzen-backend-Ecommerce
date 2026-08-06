@@ -5,9 +5,12 @@ import {
   createOrderHandler,
   getMyOrdersHandler,
   getOrderByIdHandler,
+  getOrderInvoiceHandler,
   getOrdersHandler,
+  getOrderSummaryHandler,
   updateOrderStatusHandler,
   trackOrderHandler,
+  cancelOrderHandler,
   cancelMyOrderHandler,
 } from "./orders.controller";
 import { createOrderValidationSchema, orderStatusUpdateValidationSchema } from "./orders.validation";
@@ -125,6 +128,38 @@ router.get("/", authenticate, authorizeRoles("ADMIN", "SUPER_ADMIN"), getOrdersH
 router.get("/track/:orderCode", trackOrderHandler);
 /**
  * @swagger
+ * /orders/summary:
+ *   get:
+ *     summary: Get Order Summary statistics (unpaginated database aggregation)
+ *     tags: [Orders]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: from, schema: { type: string }, description: "Start date filter" }
+ *       - { in: query, name: to, schema: { type: string }, description: "End date filter" }
+ *       - { in: query, name: status, schema: { type: string }, description: "Order status filter" }
+ *     responses:
+ *       200: { description: Order summary retrieved successfully }
+ */
+router.get("/summary", authenticate, authorizeRoles("ADMIN", "SUPER_ADMIN"), getOrderSummaryHandler);
+
+/**
+ * @swagger
+ * /orders/{id}/invoice:
+ *   get:
+ *     summary: Get order print invoice details (DELIVERED orders only)
+ *     tags: [Orders]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string }, description: "Order ID or order code" }
+ *     responses:
+ *       200: { description: Invoice retrieved successfully }
+ *       400: { description: Order is not eligible for invoice }
+ *       404: { description: Order not found }
+ */
+router.get("/:id/invoice", authenticate, getOrderInvoiceHandler);
+
+/**
+ * @swagger
  * /orders/{id}:
  *   get:
  *     summary: Get my order details
@@ -157,7 +192,7 @@ router.get("/:id", authenticate, getOrderByIdHandler);
  *       401: { description: Authentication required }
  *       404: { description: Order not found }
  */
-router.patch("/:orderId/cancel", authenticate, cancelMyOrderHandler);
+router.patch("/:id/cancel", authenticate, cancelOrderHandler);
 
 /**
  * @swagger
