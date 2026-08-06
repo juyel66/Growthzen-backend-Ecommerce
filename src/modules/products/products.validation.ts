@@ -119,7 +119,15 @@ const productFields = {
   discountValue: optionalNullableNumber("Discount value"),
   taxRate: optionalNullableNumber("Tax rate", 100),
   couponCode: optionalNullableText(100),
-  productCode: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/, "Product code contains invalid characters"),
+  productCode: z.preprocess((value) => {
+    if (value === undefined || value === null) return value;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "" || trimmed === "null" || trimmed === "undefined") return null;
+      return trimmed;
+    }
+    return value;
+  }, z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/, "Product code contains invalid characters").optional().nullable()),
   barcode: optionalNullableText(100),
   attributes: attributesSchema.optional(),
   enableSize: booleanField.optional(),
