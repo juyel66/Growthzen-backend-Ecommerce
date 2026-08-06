@@ -27,7 +27,7 @@ export interface ProductCreateInput {
   discountValue?: number | null;
   taxRate?: number | null;
   couponCode?: string | null;
-  productCode: string;
+  productCode?: string;
   barcode?: string | null;
   attributes?: ProductAttribute[];
   enableSize?: boolean;
