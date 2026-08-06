@@ -15,7 +15,8 @@ export const orderStatusUpdateValidationSchema = z.object({
   paymentStatus: z.enum(["PAID", "UNPAID", "PENDING", "FAILED", "CANCELLED", "REFUNDED"]).optional(),
   paymentCollected: z.boolean().optional(),
   adminNote: z.string().trim().nullable().optional(),
-}).refine((data) => data.orderStatus !== undefined || data.status !== undefined || data.paymentStatus !== undefined || data.paymentCollected !== undefined || data.adminNote !== undefined, {
+  courierServiceCost: parseNumber(z.number().min(0, "Courier service cost cannot be negative")).nullable().optional(),
+}).refine((data) => data.orderStatus !== undefined || data.status !== undefined || data.paymentStatus !== undefined || data.paymentCollected !== undefined || data.adminNote !== undefined || data.courierServiceCost !== undefined, {
   message: "At least one field to update must be provided",
 });
 
