@@ -545,6 +545,17 @@ export const getAllInvoicesService = async (params: GetAllInvoicesParams): Promi
   const sortBy = params.sortBy || "createdAt";
   const sortOrder = params.sortOrder || "desc";
 
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+  const todayWhere: Prisma.InvoiceWhereInput = {
+    ...where,
+    createdAt: {
+      gte: todayStart,
+      lte: todayEnd,
+    },
+  };
+
   // Query records with joined Order relation
   const [invoices, total, totalAgg, todayAgg] = await Promise.all([
     prismaClient.invoice.findMany({
@@ -567,12 +578,7 @@ export const getAllInvoicesService = async (params: GetAllInvoicesParams): Promi
       _count: { id: true },
     }),
     prismaClient.invoice.aggregate({
-      where: {
-        createdAt: {
-          gte: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0),
-          lte: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999),
-        },
-      },
+      where: todayWhere,
       _sum: { grandTotal: true },
       _count: { id: true },
     }),
