@@ -62,7 +62,7 @@ const resolveShipping = async (area: DeliveryArea, shippingMethodId?: string, db
     name: area === "INSIDE_DHAKA" ? "Inside Dhaka" : "Outside Dhaka",
     charge: baseCharge,
     estimatedDeliveryDays: settings?.estimatedDeliveryDays ?? 3,
-    freeShippingMinOrderAmount: settings?.freeShippingMinOrderAmount ?? 2000,
+    freeShippingMinOrderAmount: settings?.freeShippingMinOrderAmount ?? 0,
   };
 };
 
