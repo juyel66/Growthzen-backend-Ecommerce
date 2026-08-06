@@ -195,13 +195,14 @@ const aggregateByDate = <T extends { createdAt: Date }>(range: DashboardRangeWin
   return totals;
 };
 
-const aggregateRevenueByDate = (range: DashboardRangeWindow, records: Array<{ createdAt: Date; payableAmount: number }>): Map<string, number> => {
+const aggregateRevenueByDate = (range: DashboardRangeWindow, records: Array<{ createdAt: Date; grossSales?: number | null; netProfit?: number | null; payableAmount: number }>): Map<string, number> => {
   const granularity = getChartGranularity(range);
   const totals = new Map<string, number>();
 
   for (const record of records) {
     const key = bucketKey(record.createdAt, granularity);
-    totals.set(key, roundToTwo((totals.get(key) ?? 0) + record.payableAmount));
+    const amount = record.netProfit ?? record.grossSales ?? record.payableAmount;
+    totals.set(key, roundToTwo((totals.get(key) ?? 0) + amount));
   }
 
   return totals;
@@ -210,33 +211,151 @@ const aggregateRevenueByDate = (range: DashboardRangeWindow, records: Array<{ cr
 const mapRevenueSummary = async (query: DashboardQuery): Promise<DashboardRevenueAnalytics> => {
   const now = new Date();
   const range = resolveRangeWindow(query);
+
+  const deliveredWhere: Prisma.OrderWhereInput = { status: "DELIVERED" };
+  const todayDeliveredWhere: Prisma.OrderWhereInput = {
+    status: "DELIVERED",
+    createdAt: { gte: startOfDay(now), lte: endOfDay(now) },
+  };
+
   const [
-    totalRevenueAggregate,
-    todayRevenueAggregate,
-    yesterdayRevenueAggregate,
-    weeklyRevenueAggregate,
-    monthlyRevenueAggregate,
-    yearlyRevenueAggregate,
-    selectedRevenueAggregate,
+    deliveredAgg,
+    todayAgg,
+    yesterdayAgg,
+    weeklyAgg,
+    monthlyAgg,
+    yearlyAgg,
+    selectedAgg,
+    totalDeliveredOrders,
+    todayDeliveredOrders,
+    totalQuantityAgg,
+    todayQuantityAgg,
   ] = await Promise.all([
-    prismaClient.order.aggregate({ where: buildDeliveredRevenueWhere(), _sum: { payableAmount: true } }),
-    prismaClient.order.aggregate({ where: buildDeliveredRevenueWhere(startOfDay(now), endOfDay(now)), _sum: { payableAmount: true } }),
-    prismaClient.order.aggregate({ where: buildDeliveredRevenueWhere(startOfDay(addDays(now, -1)), endOfDay(addDays(now, -1))), _sum: { payableAmount: true } }),
-    prismaClient.order.aggregate({ where: buildDeliveredRevenueWhere(startOfDay(addDays(now, -6)), endOfDay(now)), _sum: { payableAmount: true } }),
-    prismaClient.order.aggregate({ where: buildDeliveredRevenueWhere(startOfMonth(now), endOfMonthInclusive(now)), _sum: { payableAmount: true } }),
-    prismaClient.order.aggregate({ where: buildDeliveredRevenueWhere(startOfYear(now), endOfYearInclusive(now)), _sum: { payableAmount: true } }),
-    prismaClient.order.aggregate({ where: buildDeliveredRevenueWhere(range.from, range.to), _sum: { payableAmount: true } }),
+    prismaClient.order.aggregate({
+      where: deliveredWhere,
+      _sum: {
+        customerPaid: true,
+        payableAmount: true,
+        productSellingTotal: true,
+        subtotal: true,
+        grossSales: true,
+        netProfit: true,
+        productCost: true,
+        deliveryProfit: true,
+        courierServiceCost: true,
+      },
+    }),
+    prismaClient.order.aggregate({
+      where: todayDeliveredWhere,
+      _sum: {
+        customerPaid: true,
+        payableAmount: true,
+        productSellingTotal: true,
+        subtotal: true,
+        netProfit: true,
+        grossSales: true,
+        productCost: true,
+        courierServiceCost: true,
+      },
+    }),
+    prismaClient.order.aggregate({
+      where: { status: "DELIVERED", createdAt: { gte: startOfDay(addDays(now, -1)), lte: endOfDay(addDays(now, -1)) } },
+      _sum: { netProfit: true, grossSales: true },
+    }),
+    prismaClient.order.aggregate({
+      where: { status: "DELIVERED", createdAt: { gte: startOfDay(addDays(now, -6)), lte: endOfDay(now) } },
+      _sum: { netProfit: true, grossSales: true },
+    }),
+    prismaClient.order.aggregate({
+      where: { status: "DELIVERED", createdAt: { gte: startOfMonth(now), lte: endOfMonthInclusive(now) } },
+      _sum: { netProfit: true, grossSales: true },
+    }),
+    prismaClient.order.aggregate({
+      where: { status: "DELIVERED", createdAt: { gte: startOfYear(now), lte: endOfYearInclusive(now) } },
+      _sum: { netProfit: true, grossSales: true },
+    }),
+    prismaClient.order.aggregate({
+      where: { status: "DELIVERED", createdAt: { gte: range.from, lte: range.to } },
+      _sum: { netProfit: true, grossSales: true },
+    }),
+    prismaClient.order.count({ where: deliveredWhere }),
+    prismaClient.order.count({ where: todayDeliveredWhere }),
+    prismaClient.orderItem.aggregate({
+      where: { order: deliveredWhere },
+      _sum: { quantity: true },
+    }),
+    prismaClient.orderItem.aggregate({
+      where: { order: todayDeliveredWhere },
+      _sum: { quantity: true },
+    }),
   ]);
+
+  // Overall Statistics
+  const totalCustomerSales = roundToTwo(deliveredAgg._sum.customerPaid ?? deliveredAgg._sum.payableAmount ?? 0);
+  const totalProductSellingAmount = roundToTwo(deliveredAgg._sum.productSellingTotal ?? deliveredAgg._sum.subtotal ?? 0);
+  const totalProductCost = roundToTwo(deliveredAgg._sum.productCost ?? 0);
+  const totalCourierCost = roundToTwo(deliveredAgg._sum.courierServiceCost ?? 0);
+  const totalNetProfit = roundToTwo(deliveredAgg._sum.netProfit ?? 0);
+  const totalQuantitySold = totalQuantityAgg._sum.quantity ?? 0;
+
+  // Today Statistics
+  const todayCustomerSales = roundToTwo(todayAgg._sum.customerPaid ?? todayAgg._sum.payableAmount ?? 0);
+  const todayProductSellingAmount = roundToTwo(todayAgg._sum.productSellingTotal ?? todayAgg._sum.subtotal ?? 0);
+  const todayProductCost = roundToTwo(todayAgg._sum.productCost ?? 0);
+  const todayCourierCost = roundToTwo(todayAgg._sum.courierServiceCost ?? 0);
+  const todayNetProfit = roundToTwo(todayAgg._sum.netProfit ?? 0);
+  const todayQuantitySold = todayQuantityAgg._sum.quantity ?? 0;
+
+  // Backward compatibility fields
+  const grossSales = roundToTwo(deliveredAgg._sum.grossSales ?? totalCustomerSales);
+  const netProfit = totalNetProfit;
+  const productCost = totalProductCost;
+  const courierProfit = roundToTwo(deliveredAgg._sum.deliveryProfit ?? 0);
+  const courierServiceCost = totalCourierCost;
+
+  const todaySales = roundToTwo(todayAgg._sum.grossSales ?? todayCustomerSales);
+  const todayProfit = todayNetProfit;
+  const todayCost = todayProductCost;
 
   return {
     range,
-    totalRevenue: roundToTwo(totalRevenueAggregate._sum.payableAmount ?? 0),
-    todayRevenue: roundToTwo(todayRevenueAggregate._sum.payableAmount ?? 0),
-    yesterdayRevenue: roundToTwo(yesterdayRevenueAggregate._sum.payableAmount ?? 0),
-    weeklyRevenue: roundToTwo(weeklyRevenueAggregate._sum.payableAmount ?? 0),
-    monthlyRevenue: roundToTwo(monthlyRevenueAggregate._sum.payableAmount ?? 0),
-    yearlyRevenue: roundToTwo(yearlyRevenueAggregate._sum.payableAmount ?? 0),
-    selectedRevenue: roundToTwo(selectedRevenueAggregate._sum.payableAmount ?? 0),
+
+    // Overall Statistics
+    totalCustomerSales,
+    totalProductSellingAmount,
+    totalProductCost,
+    totalCourierCost,
+    totalNetProfit,
+    totalDeliveredOrders,
+    totalQuantitySold,
+
+    // Today Statistics
+    todayCustomerSales,
+    todayProductSellingAmount,
+    todayProductCost,
+    todayCourierCost,
+    todayNetProfit,
+    todayDeliveredOrders,
+    todayQuantitySold,
+
+    // Backward-compatible fields
+    grossSales,
+    netProfit,
+    productCost,
+    courierProfit,
+    courierServiceCost,
+    todaySales,
+    todayProfit,
+    todayCost,
+    todayQuantity: todayQuantitySold,
+
+    totalRevenue: netProfit,
+    todayRevenue: todayProfit > 0 ? todayProfit : todaySales,
+    yesterdayRevenue: roundToTwo(yesterdayAgg._sum.netProfit ?? yesterdayAgg._sum.grossSales ?? 0),
+    weeklyRevenue: roundToTwo(weeklyAgg._sum.netProfit ?? weeklyAgg._sum.grossSales ?? 0),
+    monthlyRevenue: roundToTwo(monthlyAgg._sum.netProfit ?? monthlyAgg._sum.grossSales ?? 0),
+    yearlyRevenue: roundToTwo(yearlyAgg._sum.netProfit ?? yearlyAgg._sum.grossSales ?? 0),
+    selectedRevenue: roundToTwo(selectedAgg._sum.netProfit ?? selectedAgg._sum.grossSales ?? 0),
   };
 };
 
@@ -391,7 +510,7 @@ const mapCouponSummary = async () => ({ totalCoupons: await prismaClient.coupon.
 const mapRevenueChart = async (range: DashboardRangeWindow): Promise<DashboardRevenueChartPoint[]> => {
   const records = await prismaClient.order.findMany({
     where: { status: "DELIVERED", createdAt: { gte: range.from, lte: range.to } },
-    select: { createdAt: true, payableAmount: true },
+    select: { createdAt: true, grossSales: true, netProfit: true, payableAmount: true },
   });
 
   const revenueMap = aggregateRevenueByDate(range, records);
