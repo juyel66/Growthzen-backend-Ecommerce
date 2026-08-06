@@ -16,6 +16,35 @@ export interface DashboardRangeWindow {
 
 export interface DashboardRevenueAnalytics {
   range: DashboardRangeWindow;
+
+  // Overall Statistics
+  totalCustomerSales: number;
+  totalProductSellingAmount: number;
+  totalProductCost: number;
+  totalCourierCost: number;
+  totalNetProfit: number;
+  totalDeliveredOrders: number;
+  totalQuantitySold: number;
+
+  // Today Statistics
+  todayCustomerSales: number;
+  todayProductSellingAmount: number;
+  todayProductCost: number;
+  todayCourierCost: number;
+  todayNetProfit: number;
+  todayDeliveredOrders: number;
+  todayQuantitySold: number;
+
+  // Backward-compatible fields
+  grossSales: number;
+  netProfit: number;
+  productCost: number;
+  courierProfit: number;
+  courierServiceCost: number;
+  todaySales: number;
+  todayProfit: number;
+  todayCost: number;
+  todayQuantity: number;
   totalRevenue: number;
   todayRevenue: number;
   yesterdayRevenue: number;
