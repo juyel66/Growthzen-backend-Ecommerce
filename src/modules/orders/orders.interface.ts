@@ -41,6 +41,8 @@ export interface UpdateOrderStatusInput {
   paymentStatus?: "PAID" | "UNPAID" | PaymentStatus;
   paymentCollected?: boolean;
   adminNote?: string | null;
+  courierServiceCost?: number | null;
+  productCost?: number | null;
 }
 
 export interface OrderItemView {
@@ -50,6 +52,7 @@ export interface OrderItemView {
   quantity: number;
   size: string | null;
   unitPrice: number;
+  purchaseCost?: number;
   totalPrice: number;
   canReview: boolean;
   reviewed: boolean;
@@ -97,6 +100,13 @@ export interface OrderView {
   finalPayable: number;
   couponCode: string | null;
   couponId: string | null;
+  customerPaid?: number | null;
+  grossSales?: number | null;
+  productSellingTotal?: number | null;
+  productCost?: number | null;
+  courierServiceCost?: number | null;
+  netProfit?: number | null;
+  deliveryProfit?: number | null;
   status: OrderStatus;
   items: OrderItemView[];
   createdAt: Date;
@@ -131,4 +141,62 @@ export interface OrderListQuery {
   limit?: number;
   search?: string;
   status?: OrderStatus;
+}
+
+export interface OrderSummaryQueryInput {
+  from?: string;
+  to?: string;
+  status?: string;
+}
+
+export interface OrderSummaryResponse {
+  totalOrders: number;
+  totalSales: number;
+  totalProductCost: number;
+  totalCourierCost: number;
+  totalNetProfit: number;
+  todaySales: number;
+  todayProfit: number;
+}
+
+export interface OrderInvoiceProduct {
+  productId: string;
+  productName: string;
+  productImage: string | null;
+  sku: string;
+  size: string | null;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+  title: string;
+}
+
+export interface OrderInvoiceView {
+  invoiceNo: string;
+  invoiceDate: string;
+  orderNumber: string;
+  orderDate: string;
+  paymentMethod: string;
+  paymentStatus: string;
+  customer: {
+    name: string;
+    phone: string;
+    email: string;
+  };
+  shipping: {
+    address: string;
+    district: string;
+    division: string;
+    shippingType: string;
+    shippingArea: string;
+  };
+  products: OrderInvoiceProduct[];
+  subtotal: number;
+  discount: number;
+  deliveryCharge: number;
+  grandTotal: number;
+  productCost: number;
+  courierCost: number;
+  courierProfit: number;
+  netProfit: number;
 }
